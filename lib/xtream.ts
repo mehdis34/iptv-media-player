@@ -69,8 +69,15 @@ export async function fetchLiveCategories(creds: XtreamCredentials) {
   return (await res.json()) as XtreamCategory[];
 }
 
-export async function fetchLiveStreams(creds: XtreamCredentials) {
-  const url = buildApiUrl(creds, { action: 'get_live_streams' });
+export async function fetchLiveStreams(
+  creds: XtreamCredentials,
+  categoryId?: string
+) {
+  const params: Record<string, string> = { action: 'get_live_streams' };
+  if (categoryId && categoryId !== 'all') {
+    params.category_id = categoryId;
+  }
+  const url = buildApiUrl(creds, params);
   const res = await fetch(url);
   if (!res.ok) {
     throw new Error("Impossible de charger les chaînes.");

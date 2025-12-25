@@ -125,9 +125,15 @@ export default function LibraryScreen() {
                 onPress={() =>
                   router.push({
                     pathname: '/player/[id]' as const,
-                    params: { id: String(stream.stream_id), name: stream.name, type: 'tv' },
-                  })
-                }
+                  params: {
+                    id: String(stream.stream_id),
+                    name: stream.name,
+                    icon: stream.stream_icon ?? undefined,
+                    categoryId: stream.category_id ?? undefined,
+                    type: 'tv',
+                  },
+                })
+              }
                 className="rounded-2xl border border-ash bg-ash/40 px-4 py-3"
               >
                 <View className="flex-row items-center justify-between">

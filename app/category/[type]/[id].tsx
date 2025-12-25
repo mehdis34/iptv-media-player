@@ -305,7 +305,13 @@ export default function CategoryScreen() {
                 onPress={() =>
                   router.push({
                   pathname: '/player/[id]' as const,
-                    params: { id: String(item.stream_id), name: item.name, type: 'tv' },
+                    params: {
+                      id: String(item.stream_id),
+                      name: item.name,
+                      icon: item.stream_icon ?? undefined,
+                      categoryId: item.category_id ?? undefined,
+                      type: 'tv',
+                    },
                   })
                 }
                 onToggleFavorite={() => handleToggleFavorite(item.stream_id)}

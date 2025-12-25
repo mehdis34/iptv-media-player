@@ -107,6 +107,7 @@ export default function HomeScreen() {
     const tvTabsScrollRef = useRef<ScrollView>(null);
     const lastProfileKey = useRef<string | null>(null);
     const hasLoadedOnce = useRef(false);
+    const hasLoadedEpg = useRef(false);
 
     const handlePlaySeries = useCallback(
         async (seriesId: number, seriesName: string) => {
@@ -162,10 +163,14 @@ export default function HomeScreen() {
             try {
                 const activeId = await getActiveProfileId();
                 const profileKey = activeId ?? 'default';
-                if (hasLoadedOnce.current && lastProfileKey.current === profileKey) {
+                const profileChanged = lastProfileKey.current !== profileKey;
+                if (hasLoadedOnce.current && !profileChanged) {
                     return;
                 }
                 lastProfileKey.current = profileKey;
+                if (profileChanged) {
+                    hasLoadedEpg.current = false;
+                }
                 setLoading(true);
                 setShowInitialLoader(false);
                 setError('');
@@ -203,6 +208,15 @@ export default function HomeScreen() {
                 setResumeItems(resumes);
 
                 if (cacheFresh) {
+                    if (!hasLoadedEpg.current) {
+                        const cachedLive = cache.data.liveStreams ?? [];
+                        const filteredLive = tvCategoryId
+                            ? cachedLive.filter((stream) => stream.category_id === tvCategoryId)
+                            : cachedLive;
+                        if (filteredLive.length) {
+                            void loadEpgData(filteredLive);
+                        }
+                    }
                     hasLoadedOnce.current = true;
                     setLoading(false);
                     return;
@@ -369,6 +383,7 @@ export default function HomeScreen() {
             } finally {
                 setTvGuideLoading(false);
                 setTvNowEpgLoading(false);
+                hasLoadedEpg.current = true;
             }
         },
         []
@@ -896,7 +911,8 @@ export default function HomeScreen() {
                                     params: {
                                         id: String(stream.stream_id),
                                         name: stream.name,
-                                        icon: stream.stream_icon ?? '',
+                                        icon: stream.stream_icon ?? undefined,
+                                        categoryId: stream.category_id ?? undefined,
                                         type: 'tv',
                                     },
                                 })
@@ -1102,7 +1118,8 @@ export default function HomeScreen() {
                                                                     params: {
                                                                         id: String(item.stream_id),
                                                                         name: item.name,
-                                                                        icon: item.stream_icon ?? '',
+                                                                        icon: item.stream_icon ?? undefined,
+                                                                        categoryId: item.category_id ?? undefined,
                                                                         type: 'tv',
                                                                     },
                                                                 })
@@ -1175,7 +1192,8 @@ export default function HomeScreen() {
                                                                         params: {
                                                                             id: String(item.stream_id),
                                                                             name: item.name,
-                                                                            icon: item.stream_icon ?? '',
+                                                                            icon: item.stream_icon ?? undefined,
+                                                                            categoryId: item.category_id ?? undefined,
                                                                             type: 'tv',
                                                                         },
                                                                     });
@@ -1271,7 +1289,8 @@ export default function HomeScreen() {
                                                 params: {
                                                     id: String(item.stream_id),
                                                     name: item.name,
-                                                    icon: item.stream_icon ?? '',
+                                                    icon: item.stream_icon ?? undefined,
+                                                    categoryId: item.category_id ?? undefined,
                                                     type: 'tv',
                                                 },
                                             })
@@ -1555,7 +1574,8 @@ export default function HomeScreen() {
                                             params: {
                                                 id: String(epgInfoStream.stream_id),
                                                 name: epgInfoStream.name,
-                                                icon: epgInfoStream.stream_icon ?? '',
+                                                icon: epgInfoStream.stream_icon ?? undefined,
+                                                categoryId: epgInfoStream.category_id ?? undefined,
                                                 type: 'tv',
                                             },
                                         });

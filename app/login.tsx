@@ -51,7 +51,7 @@ export default function LoginScreen() {
         setValue('avatarSeed', randomSeed, {shouldValidate: true});
         setValue('host', 'http://tvchallenge.tn:7040', {shouldValidate: true});
         setValue('username', 'mehdi30', {shouldValidate: true});
-        setValue('password', '2QabubLAD2yQ', {shouldValidate: true});
+        setValue('password', '8xEW5uunD4d2', {shouldValidate: true});
     };
 
     const onSubmit = handleSubmit(async (values) => {

@@ -1,19 +1,22 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
+import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import {StatusBar} from 'expo-status-bar';
 import {useLocalSearchParams, useRouter} from 'expo-router';
-import {useEffect, useMemo, useRef, useState} from 'react';
+import {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {BlurView} from 'expo-blur';
-import {Animated, FlatList, Image, Modal, Pressable, ScrollView, SectionList, StyleSheet, Text, View} from 'react-native';
+import {ActivityIndicator, Animated, FlatList, Image, Modal, Pressable, ScrollView, SectionList, StyleSheet, Text, useWindowDimensions, View} from 'react-native';
 import Slider from '@react-native-community/slider';
+import {Buffer} from 'buffer';
 
-import {getCredentials, getFavoriteItems, getResumeItem, toggleFavoriteItem, upsertResumeItem} from '@/lib/storage';
-import {buildSeriesEpisodeUrl, buildStreamUrl, buildVodUrl, fetchSeriesInfo, fetchXmltvEpg} from '@/lib/xtream';
+import {getCatalogCache, getCredentials, getFavoriteItems, getResumeItem, toggleFavoriteItem, upsertResumeItem} from '@/lib/storage';
+import {buildSeriesEpisodeUrl, buildStreamUrl, buildVodUrl, fetchLiveCategories, fetchLiveStreams, fetchSeriesInfo, fetchXmltvEpg} from '@/lib/xtream';
 import {VLCPlayer} from 'react-native-vlc-media-player';
-import type {FavoriteItem, ResumeItem, XtreamEpisode, XtreamEpgListing, XtreamSeriesInfo} from '@/lib/types';
+import type {FavoriteItem, ResumeItem, XtreamCategory, XtreamEpisode, XtreamEpgListing, XtreamSeriesInfo, XtreamStream} from '@/lib/types';
 import {safeImageUri} from '@/lib/media';
 
 export default function PlayerScreen() {
     const router = useRouter();
+    const {width} = useWindowDimensions();
     const params = useLocalSearchParams<{
         id?: string;
         name?: string;
@@ -22,6 +25,8 @@ export default function PlayerScreen() {
         seriesId?: string;
         season?: string;
         start?: string;
+        categoryId?: string;
+        icon?: string;
     }>();
 
     const playerRef = useRef<VLCPlayer>(null);
@@ -49,9 +54,24 @@ export default function PlayerScreen() {
     const [season, setSeason] = useState<number | null>(null);
     const [showEpisodes, setShowEpisodes] = useState(false);
     const [showSeasonPicker, setShowSeasonPicker] = useState(false);
-    const [showZap, setShowZap] = useState(false);
+    const [activeSidePanel, setActiveSidePanel] = useState<'epg' | 'zap' | null>(null);
     const [tvEpgLoading, setTvEpgLoading] = useState(false);
     const [tvEpgListings, setTvEpgListings] = useState<XtreamEpgListing[]>([]);
+    const [tvXmltvListingsByChannel, setTvXmltvListingsByChannel] = useState<
+        Record<string, XtreamEpgListing[]>
+    >({});
+    const [tvXmltvChannelIdByName, setTvXmltvChannelIdByName] = useState<Record<string, string>>({});
+    const [zapCategories, setZapCategories] = useState<XtreamCategory[]>([]);
+    const [zapCategoriesLoading, setZapCategoriesLoading] = useState(false);
+    const [zapCategoryId, setZapCategoryId] = useState<string | null>(null);
+    const [zapStreamsByCategory, setZapStreamsByCategory] = useState<
+        Record<string, XtreamStream[]>
+    >({});
+    const [zapLoadingCategory, setZapLoadingCategory] = useState<string | null>(null);
+    const [zapError, setZapError] = useState('');
+    const [zapTabLayouts, setZapTabLayouts] = useState<
+        Record<string, { x: number; width: number; pad: number }>
+    >({});
     const [returnToEpisodes, setReturnToEpisodes] = useState(false);
     const [resumeEntry, setResumeEntry] = useState<ResumeItem | null>(null);
     const episodesListRef = useRef<FlatList<XtreamEpisode>>(null);
@@ -61,7 +81,73 @@ export default function PlayerScreen() {
     const lastSavedRef = useRef(0);
     const hasSeekedRef = useRef(false);
     const controlsOpacity = useRef(new Animated.Value(1)).current;
+    const zapAnim = useRef(new Animated.Value(0)).current;
+    const zapUnderlineX = useRef(new Animated.Value(0)).current;
+    const zapUnderlineWidth = useRef(new Animated.Value(0)).current;
+    const zapTabsScrollRef = useRef<ScrollView>(null);
+    const lastZapScrollId = useRef<string | null>(null);
+    const hasLoadedZapCategories = useRef(false);
     const isLive = params.type === 'tv';
+    const isSidePanelOpen = isLive && activeSidePanel !== null;
+    const zapWidth = Math.round(width * 0.3);
+    const playerWidthValue = Math.max(0, width - zapWidth);
+    const playerWidth = zapAnim.interpolate({
+        inputRange: [0, 1],
+        outputRange: [width, playerWidthValue],
+    });
+    const zapPanelWidth = zapAnim.interpolate({
+        inputRange: [0, 1],
+        outputRange: [0, zapWidth],
+    });
+
+    useEffect(() => {
+        Animated.timing(zapAnim, {
+            toValue: isSidePanelOpen ? 1 : 0,
+            duration: 220,
+            useNativeDriver: false,
+        }).start();
+    }, [isSidePanelOpen, zapAnim]);
+
+    useEffect(() => {
+        if (!zapCategoryId) {
+            Animated.timing(zapUnderlineWidth, {
+                toValue: 0,
+                duration: 200,
+                useNativeDriver: false,
+            }).start();
+            return;
+        }
+        const target = zapTabLayouts[zapCategoryId];
+        if (!target) return;
+        Animated.parallel([
+            Animated.timing(zapUnderlineX, {
+                toValue: target.x,
+                duration: 220,
+                useNativeDriver: false,
+            }),
+            Animated.timing(zapUnderlineWidth, {
+                toValue: target.width - target.pad * 2,
+                duration: 220,
+                useNativeDriver: false,
+            }),
+        ]).start();
+    }, [zapCategoryId, zapTabLayouts, zapUnderlineWidth, zapUnderlineX]);
+
+    useEffect(() => {
+        if (activeSidePanel !== 'zap') {
+            lastZapScrollId.current = null;
+            return;
+        }
+        if (!zapCategoryId) return;
+        const target = zapTabLayouts[zapCategoryId];
+        if (!target) return;
+        if (lastZapScrollId.current === zapCategoryId) return;
+        lastZapScrollId.current = zapCategoryId;
+        const timer = setTimeout(() => {
+            zapTabsScrollRef.current?.scrollTo({x: target.x, animated: true});
+        }, 0);
+        return () => clearTimeout(timer);
+    }, [activeSidePanel, zapCategoryId, zapTabLayouts]);
 
     useEffect(() => {
         let mounted = true;
@@ -112,7 +198,8 @@ export default function PlayerScreen() {
         setIsReady(false);
         setControlsVisible(true);
         scheduleHide(true);
-        setShowZap(false);
+        setActiveSidePanel(null);
+        setZapCategoryId(null);
     }, [params.id, params.type]);
 
     useEffect(() => {
@@ -120,6 +207,8 @@ export default function PlayerScreen() {
         async function loadLiveEpg() {
             if (!isLive || !params.name) {
                 setTvEpgListings([]);
+                setTvXmltvListingsByChannel({});
+                setTvXmltvChannelIdByName({});
                 return;
             }
             setTvEpgLoading(true);
@@ -128,14 +217,19 @@ export default function PlayerScreen() {
                 if (!creds) return;
                 const xmltv = await fetchXmltvEpg(creds);
                 const channelIdByName = xmltv.channelIdByName ?? {};
+                setTvXmltvListingsByChannel(xmltv.listingsByChannel ?? {});
+                setTvXmltvChannelIdByName(channelIdByName);
                 const normalized = normalizeXmltvName(params.name);
-                const channelId = channelIdByName[normalized];
+                const channelId =
+                    channelIdByName[normalized] ?? (params.id ? String(params.id) : '');
                 const listings = channelId ? xmltv.listingsByChannel?.[channelId] ?? [] : [];
                 if (!active) return;
                 setTvEpgListings(listings);
             } catch {
                 if (!active) return;
                 setTvEpgListings([]);
+                setTvXmltvListingsByChannel({});
+                setTvXmltvChannelIdByName({});
             } finally {
                 if (active) setTvEpgLoading(false);
             }
@@ -145,6 +239,65 @@ export default function PlayerScreen() {
             active = false;
         };
     }, [isLive, params.name]);
+
+    useEffect(() => {
+        if (!isLive || activeSidePanel !== 'zap' || hasLoadedZapCategories.current) {
+            return;
+        }
+        let active = true;
+        setZapCategoriesLoading(true);
+        setZapError('');
+        async function loadZapCategories() {
+            try {
+                const creds = await getCredentials();
+                if (!creds) return;
+                const categories = await fetchLiveCategories(creds);
+                if (!active) return;
+                setZapCategories(categories);
+                hasLoadedZapCategories.current = true;
+            } catch (err) {
+                if (!active) return;
+                setZapError(
+                    err instanceof Error
+                        ? err.message
+                        : 'Chargement des catégories impossible.'
+                );
+            } finally {
+                if (active) setZapCategoriesLoading(false);
+            }
+        }
+        loadZapCategories();
+        return () => {
+            active = false;
+        };
+    }, [activeSidePanel, isLive]);
+
+    useEffect(() => {
+        if (!isLive || activeSidePanel !== 'zap' || zapCategoryId) {
+            return;
+        }
+        let active = true;
+        async function selectDefaultCategory() {
+            let categoryId =
+                typeof params.categoryId === 'string' && params.categoryId.trim()
+                    ? params.categoryId
+                    : null;
+            if (!categoryId && params.id) {
+                const cache = await getCatalogCache();
+                const streamId = Number(params.id);
+                const stream = cache.data.liveStreams?.find(
+                    (item) => item.stream_id === streamId
+                );
+                categoryId = stream?.category_id ?? null;
+            }
+            if (!active || !categoryId) return;
+            await handleSelectZapCategory(categoryId);
+        }
+        selectDefaultCategory();
+        return () => {
+            active = false;
+        };
+    }, [activeSidePanel, handleSelectZapCategory, isLive, params.categoryId, params.id, zapCategoryId]);
 
     useEffect(() => {
         if (!params.id) {
@@ -426,6 +579,33 @@ export default function PlayerScreen() {
         return value.toLowerCase().replace(/[^a-z0-9]/g, '');
     }
 
+    const decodeEpgText = (value?: string | null) => {
+        if (!value) return '';
+        const trimmed = value.trim();
+        if (!/^[A-Za-z0-9+/=]+$/.test(trimmed) || trimmed.length % 4 !== 0) {
+            return value;
+        }
+        try {
+            const decoded = Buffer.from(trimmed, 'base64').toString('utf8').trim();
+            if (!decoded) return value;
+            const nonPrintableRatio =
+                decoded.replace(/[\x20-\x7E\u00A0-\u00FF]/g, '').length / decoded.length;
+            return nonPrintableRatio > 0.3 ? value : decoded;
+        } catch {
+            return value;
+        }
+    };
+
+    const resolveXmltvChannelId = useCallback(
+        (stream: XtreamStream) => {
+            if (stream.epg_channel_id) return stream.epg_channel_id;
+            if (stream.epg_id) return stream.epg_id;
+            const normalized = normalizeXmltvName(stream.name);
+            return tvXmltvChannelIdByName[normalized] ?? String(stream.stream_id);
+        },
+        [tvXmltvChannelIdByName]
+    );
+
     const formatDayLabel = (date: Date, today: Date) => {
         const startOfDay = (value: Date) =>
             new Date(value.getFullYear(), value.getMonth(), value.getDate()).getTime();
@@ -492,6 +672,64 @@ export default function PlayerScreen() {
         return Math.min(1, Math.max(0, elapsed / total));
     }, [liveNow]);
 
+    const zapCategoryOptions = useMemo(() => {
+        if (!isLive) return [];
+        return [
+            {category_id: 'all', category_name: 'Toutes les chaînes'},
+            ...zapCategories,
+        ];
+    }, [isLive, zapCategories]);
+
+    const zapStreams = useMemo(() => {
+        if (!zapCategoryId) return [];
+        return zapStreamsByCategory[zapCategoryId] ?? [];
+    }, [zapCategoryId, zapStreamsByCategory]);
+
+    const handleSelectZapCategory = useCallback(
+        async (categoryId: string) => {
+            setZapCategoryId(categoryId);
+            setZapError('');
+            if (zapStreamsByCategory[categoryId]) return;
+            setZapLoadingCategory(categoryId);
+            try {
+                const creds = await getCredentials();
+                if (!creds) return;
+                const streams = await fetchLiveStreams(
+                    creds,
+                    categoryId === 'all' ? undefined : categoryId
+                );
+                setZapStreamsByCategory((prev) => ({
+                    ...prev,
+                    [categoryId]: streams,
+                }));
+            } catch (err) {
+                setZapError(
+                    err instanceof Error ? err.message : 'Chargement des chaînes impossible.'
+                );
+            } finally {
+                setZapLoadingCategory((prev) => (prev === categoryId ? null : prev));
+            }
+        },
+        [zapStreamsByCategory]
+    );
+
+    const handleZapStreamPress = useCallback(
+        (stream: XtreamStream) => {
+            setActiveSidePanel(null);
+            router.replace({
+                pathname: '/player/[id]' as const,
+                params: {
+                    id: String(stream.stream_id),
+                    name: stream.name,
+                    icon: stream.stream_icon ?? undefined,
+                    categoryId: stream.category_id ?? undefined,
+                    type: 'tv',
+                },
+            });
+        },
+        [router]
+    );
+
     const handleJump = (seconds: number) => {
         if (!duration || !playerRef.current) return;
         const current = Math.floor(currentTime);
@@ -519,6 +757,7 @@ export default function PlayerScreen() {
         params.type === 'vod' ? 'movie' : params.type === 'series' ? 'series' : null;
     const resumeId = params.id ? Number(params.id) : null;
     const currentEpisode = currentEpisodeIndex >= 0 ? episodes[currentEpisodeIndex] : null;
+    const liveLogo = isLive ? safeImageUri(params.icon) : undefined;
     const resumeImage =
         params.type === 'series'
             ? currentEpisode?.info?.movie_image ??
@@ -635,7 +874,11 @@ export default function PlayerScreen() {
                     </Pressable>
                 </View>
             ) : streamUrl ? (
-                <View className="flex-1">
+                <View className="flex-1 flex-row">
+                    <Animated.View
+                        className="h-full"
+                        style={isLive ? {width: playerWidth} : {flex: 1}}
+                    >
                     <VLCPlayer
                         ref={playerRef}
                         key={streamUrl ?? 'player'}
@@ -691,7 +934,10 @@ export default function PlayerScreen() {
                                     name: track.name ?? `Sous-titre ${track.id}`,
                                 })) ?? []);
                         }}
-                        onPlaying={() => setPaused(false)}
+                        onPlaying={() => {
+                            setPaused(false);
+                            setIsReady(true);
+                        }}
                         onPaused={() => {
                             setPaused(true);
                             if (resumeType && resumeId !== null && duration > 0 && currentTime > 0) {
@@ -720,80 +966,11 @@ export default function PlayerScreen() {
                                 controlsVisible ? 'bg-black/70' : 'bg-transparent'
                             }`}
                         />
-                        {isLive && showZap ? (
-                            <View className="absolute inset-0 z-20 flex-row justify-end">
-                                <Pressable
-                                    onPress={() => setShowZap(false)}
-                                    className="flex-1"
-                                />
-                                <View className="w-[40%] h-full border-l border-white/10 bg-black/80 px-4 pt-8">
-                                    <View className="flex-row items-center justify-between">
-                                        <Text className="font-bodySemi text-base text-white">
-                                            À suivre
-                                        </Text>
-                                        <Pressable onPress={() => setShowZap(false)}>
-                                            <Ionicons name="close" size={20} color="#ffffff"/>
-                                        </Pressable>
-                                    </View>
-                                    {tvEpgLoading ? (
-                                        <Text className="mt-4 font-body text-xs text-white/60">
-                                            Chargement...
-                                        </Text>
-                                    ) : (
-                                        <SectionList
-                                            className="mt-4"
-                                            sections={buildEpgSections(tvEpgListings)}
-                                            keyExtractor={(item, index) => String(item.epg_id ?? index)}
-                                            showsVerticalScrollIndicator={false}
-                                            stickySectionHeadersEnabled
-                                            renderSectionHeader={({section}) => (
-                                                <View className="bg-black/80 py-2">
-                                                    <Text className="font-bodySemi text-xs uppercase text-white/60">
-                                                        {section.title}
-                                                    </Text>
-                                                </View>
-                                            )}
-                                            renderItem={({item}) => {
-                                                const start = parseXmltvDate(item.start);
-                                                const end = parseXmltvDate(item.end);
-                                                const now = new Date();
-                                                const isCurrent =
-                                                    !!start && !!end && start <= now && end >= now;
-                                                return (
-                                                    <View className="border-b border-white/10 pb-3 pt-2">
-                                                        <View className="flex-row items-center gap-2">
-                                                            {isCurrent ? (
-                                                                <>
-                                                                    <View className="h-2 w-2 rounded-full bg-ember"/>
-                                                                    <Text className="font-bodySemi text-[11px] uppercase text-ember">
-                                                                        Live
-                                                                    </Text>
-                                                                </>
-                                                            ) : null}
-                                                            <Text className="font-bodySemi text-xs text-white/70">
-                                                                {formatClock(start)} - {formatClock(end)}
-                                                            </Text>
-                                                        </View>
-                                                        <Text
-                                                            className={`font-bodySemi text-sm ${
-                                                                isCurrent ? 'text-white' : 'text-white/80'
-                                                            }`}
-                                                            numberOfLines={2}
-                                                        >
-                                                            {item.title ?? 'Programme'}
-                                                        </Text>
-                                                        {item.category ? (
-                                                            <Text className="mt-1 font-body text-xs text-white/60">
-                                                                {item.category}
-                                                            </Text>
-                                                        ) : null}
-                                                    </View>
-                                                );
-                                            }}
-                                        />
-                                    )}
-                                </View>
-                            </View>
+                        {isSidePanelOpen ? (
+                            <Pressable
+                                onPress={() => setActiveSidePanel(null)}
+                                className="absolute inset-0 z-20"
+                            />
                         ) : null}
                         <Animated.View
                             className="absolute inset-0 z-10"
@@ -823,6 +1000,14 @@ export default function PlayerScreen() {
                                                         resizeMode="cover"
                                                     />
                                                 ) : null}
+                                            </View>
+                                        ) : isLive && liveLogo ? (
+                                            <View className="h-12 w-12 overflow-hidden rounded-lg bg-slate">
+                                                <Image
+                                                    source={{uri: liveLogo}}
+                                                    className="h-full w-full"
+                                                    resizeMode="contain"
+                                                />
                                             </View>
                                         ) : null}
                                         <View className="flex-1 min-w-0 pr-4">
@@ -904,24 +1089,38 @@ export default function PlayerScreen() {
                                     {isLive ? (
                                         <>
                                             <View className="w-[90%]">
-                                                <Text className="font-bodySemi text-sm text-white" numberOfLines={2}>
-                                                    {liveNow?.title ?? 'Programme en cours'}
-                                                </Text>
-                                                <Text className="mt-1 font-body text-xs text-white/70">
-                                                    {liveNow
-                                                        ? `${formatClock(parseXmltvDate(liveNow.start))} - ${formatClock(
-                                                              parseXmltvDate(liveNow.end)
-                                                          )}`
-                                                        : '--:--'}
-                                                </Text>
-                                                <View className="mt-2 h-1.5 overflow-hidden rounded-full bg-white/20">
-                                                    <View
-                                                        className="h-full rounded-full bg-ember"
-                                                        style={{
-                                                            width: `${Math.round((liveProgress ?? 0) * 100)}%`,
-                                                        }}
-                                                    />
-                                                </View>
+                                                {liveNow?.title ? (
+                                                    <Text
+                                                        className="font-bodySemi text-sm text-white"
+                                                        numberOfLines={2}
+                                                    >
+                                                        {liveNow.title}
+                                                    </Text>
+                                                ) : (
+                                                    <View className="flex-row items-center gap-2">
+                                                        <View className="h-2 w-2 rounded-full bg-ember" />
+                                                        <Text className="font-bodySemi text-sm text-white">
+                                                            En direct
+                                                        </Text>
+                                                    </View>
+                                                )}
+                                                {liveNow ? (
+                                                    <Text className="mt-1 font-body text-xs text-white/70">
+                                                        {`${formatClock(parseXmltvDate(liveNow.start))} - ${formatClock(
+                                                            parseXmltvDate(liveNow.end)
+                                                        )}`}
+                                                    </Text>
+                                                ) : null}
+                                                {liveProgress !== null ? (
+                                                    <View className="mt-2 h-1.5 overflow-hidden rounded-full bg-white/20">
+                                                        <View
+                                                            className="h-full rounded-full bg-ember"
+                                                            style={{
+                                                                width: `${Math.round(liveProgress * 100)}%`,
+                                                            }}
+                                                        />
+                                                    </View>
+                                                ) : null}
                                             </View>
                                         </>
                                     ) : (
@@ -968,31 +1167,59 @@ export default function PlayerScreen() {
                                         </>
                                     )}
                                     <View className="mt-3 w-[90%] min-h-[44px] flex-row items-center justify-center gap-6">
-                                        <Pressable
-                                            onPress={() => setShowTracks(true)}
-                                            disabled={!isReady}
-                                            className={`flex-row items-center gap-2 ${
-                                                isReady ? '' : 'opacity-50'
-                                            }`}
-                                        >
-                                            <Ionicons
-                                                name="chatbubbles-outline"
-                                                size={18}
-                                                color="#ffffff"
-                                            />
-                                            <Text className="font-bold text-base text-white">
-                                                Audio et sous-titres
-                                            </Text>
-                                        </Pressable>
-                                        {isLive ? (
+                                        {!isLive ? (
                                             <Pressable
-                                                onPress={() => setShowZap((prev) => !prev)}
-                                                className="flex-row items-center gap-2 rounded-full bg-white/10 px-4 py-2"
+                                                onPress={() => setShowTracks(true)}
+                                                disabled={!isReady}
+                                                className={`flex-row items-center gap-2 ${
+                                                    isReady ? '' : 'opacity-50'
+                                                }`}
                                             >
-                                                <Ionicons name="flash" size={18} color="#ffffff"/>
-                                                <Text className="font-bold text-base text-white">ZAP</Text>
+                                                <Ionicons
+                                                    name="chatbubbles-outline"
+                                                    size={18}
+                                                    color="#ffffff"
+                                                />
+                                                <Text className="font-bold text-base text-white">
+                                                    Audio et sous-titres
+                                                </Text>
                                             </Pressable>
-                                        ) : null}
+                                        ) : (
+                                            <>
+                                                <Pressable
+                                                    onPress={() =>
+                                                        setActiveSidePanel((prev) =>
+                                                            prev === 'epg' ? null : 'epg'
+                                                        )
+                                                    }
+                                                    className="flex-row items-center gap-2"
+                                                >
+                                                    <Ionicons
+                                                        name="time-outline"
+                                                        size={18}
+                                                        color="#ffffff"
+                                                    />
+                                                    <Text className="font-bold text-base text-white">
+                                                        Programme TV
+                                                    </Text>
+                                                </Pressable>
+                                                <Pressable
+                                                    onPress={() =>
+                                                        setActiveSidePanel((prev) =>
+                                                            prev === 'zap' ? null : 'zap'
+                                                        )
+                                                    }
+                                                    className="flex-row items-center gap-2"
+                                                >
+                                                    <MaterialCommunityIcons
+                                                        name="remote-tv"
+                                                        size={18}
+                                                        color="#ffffff"
+                                                    />
+                                                    <Text className="font-bold text-base text-white">Zap</Text>
+                                                </Pressable>
+                                            </>
+                                        )}
                                         {params.type === 'series' ? (
                                             <>
                                                 <Pressable
@@ -1049,6 +1276,287 @@ export default function PlayerScreen() {
                                 </View>
                         </Animated.View>
                     </View>
+                    </Animated.View>
+                    {isLive ? (
+                        <Animated.View
+                            className="h-full border-l border-white/10 bg-black px-4 pt-8 overflow-hidden"
+                            style={{width: zapPanelWidth}}
+                            pointerEvents={activeSidePanel ? 'auto' : 'none'}
+                        >
+                            {activeSidePanel === 'epg' ? (
+                                <>
+                                    <View className="flex-row items-center justify-between">
+                                        <Text className="font-bodySemi text-lg text-white">
+                                            À suivre
+                                        </Text>
+                                        <Pressable onPress={() => setActiveSidePanel(null)}>
+                                            <Ionicons name="close" size={20} color="#ffffff"/>
+                                        </Pressable>
+                                    </View>
+                                    {tvEpgLoading ? (
+                                        <Text className="mt-4 font-body text-xs text-white/60">
+                                            Chargement...
+                                        </Text>
+                                    ) : tvEpgListings.length === 0 ? (
+                                        <Text className="mt-4 font-body text-xs text-white/60">
+                                            Programme indisponible.
+                                        </Text>
+                                    ) : (
+                                        <SectionList
+                                            className="mt-4"
+                                            sections={buildEpgSections(tvEpgListings)}
+                                            keyExtractor={(item, index) => String(item.epg_id ?? index)}
+                                            showsVerticalScrollIndicator={false}
+                                            stickySectionHeadersEnabled
+                                            renderSectionHeader={({section}) => (
+                                                <View className="bg-black/80 py-2">
+                                                    <Text className="font-bodySemi text-xs uppercase text-white/60">
+                                                        {section.title}
+                                                    </Text>
+                                                </View>
+                                            )}
+                                            renderItem={({item}) => {
+                                                const start = parseXmltvDate(item.start);
+                                                const end = parseXmltvDate(item.end);
+                                                const now = new Date();
+                                                const isCurrent =
+                                                    !!start && !!end && start <= now && end >= now;
+                                                return (
+                                                    <View className="border-b border-white/10 pb-3 pt-2">
+                                                        <View className="flex-row items-center gap-2">
+                                                            {isCurrent ? (
+                                                                <>
+                                                                    <View className="h-2 w-2 rounded-full bg-ember"/>
+                                                                    <Text className="font-bodySemi text-[11px] uppercase text-ember">
+                                                                        Live
+                                                                    </Text>
+                                                                </>
+                                                            ) : null}
+                                                            <Text className="font-bodySemi text-xs text-white/70">
+                                                                {formatClock(start)} - {formatClock(end)}
+                                                            </Text>
+                                                        </View>
+                                                        <Text
+                                                            className={`font-bodySemi text-sm ${
+                                                                isCurrent ? 'text-white' : 'text-white/80'
+                                                            }`}
+                                                            numberOfLines={2}
+                                                        >
+                                                            {item.title ?? 'Programme'}
+                                                        </Text>
+                                                        {item.category ? (
+                                                            <Text className="mt-1 font-body text-xs text-white/60">
+                                                                {item.category}
+                                                            </Text>
+                                                        ) : null}
+                                                    </View>
+                                                );
+                                            }}
+                                        />
+                                    )}
+                                </>
+                            ) : activeSidePanel === 'zap' ? (
+                                <>
+                                    <View className="flex-row items-center justify-between">
+                                        <Text className="font-bodySemi text-lg text-white">
+                                            Zap
+                                        </Text>
+                                        <Pressable onPress={() => setActiveSidePanel(null)}>
+                                            <Ionicons name="close" size={20} color="#ffffff"/>
+                                        </Pressable>
+                                    </View>
+                                    <View className="mt-4">
+                                        {zapCategoriesLoading ? (
+                                            <View className="items-center py-4">
+                                                <ActivityIndicator size="small" color="#ffffff" />
+                                            </View>
+                                        ) : zapCategoryOptions.length ? (
+                                            <ScrollView
+                                                ref={zapTabsScrollRef}
+                                                horizontal
+                                                showsHorizontalScrollIndicator={false}
+                                                contentContainerStyle={{gap: 24, paddingRight: 24}}
+                                            >
+                                                <View className="relative flex-row gap-10">
+                                                    {zapCategoryOptions.map((item) => (
+                                                        <Pressable
+                                                            key={item.category_id}
+                                                            onPress={() => {
+                                                                handleSelectZapCategory(item.category_id);
+                                                                const target = zapTabLayouts[item.category_id];
+                                                                if (target) {
+                                                                    zapTabsScrollRef.current?.scrollTo({
+                                                                        x: target.x,
+                                                                        animated: true,
+                                                                    });
+                                                                }
+                                                            }}
+                                                            onLayout={(event) => {
+                                                                const {x, width} = event.nativeEvent.layout;
+                                                                setZapTabLayouts((prev) => ({
+                                                                    ...prev,
+                                                                    [item.category_id]: {x, width, pad: 10},
+                                                                }));
+                                                            }}
+                                                            className="pb-3"
+                                                        >
+                                                            <Text
+                                                                className={`pt-4 font-bodySemi text-base ${
+                                                                    item.category_id === zapCategoryId
+                                                                        ? 'text-white'
+                                                                        : 'text-white/50'
+                                                                }`}
+                                                            >
+                                                                {item.category_name}
+                                                            </Text>
+                                                        </Pressable>
+                                                    ))}
+                                                    <Animated.View
+                                                        style={{
+                                                            position: 'absolute',
+                                                            top: 0,
+                                                            height: 4,
+                                                            borderRadius: 999,
+                                                            backgroundColor: '#e50914',
+                                                            transform: [{translateX: zapUnderlineX}],
+                                                            width: zapUnderlineWidth,
+                                                        }}
+                                                    />
+                                                </View>
+                                            </ScrollView>
+                                        ) : (
+                                            <Text className="font-body text-xs text-white/60">
+                                                Aucune catégorie disponible.
+                                            </Text>
+                                        )}
+                                    </View>
+                                    <View className="mt-4 flex-1">
+                                        {zapError ? (
+                                            <Text className="font-body text-xs text-ember">
+                                                {zapError}
+                                            </Text>
+                                        ) : null}
+                                        {zapCategoriesLoading ? null : !zapCategoryId ? (
+                                            <Text className="font-body text-xs text-white/60">
+                                                Sélectionnez une catégorie.
+                                            </Text>
+                                        ) : zapLoadingCategory === zapCategoryId ? (
+                                            <View className="items-center py-4">
+                                                <ActivityIndicator size="small" color="#ffffff" />
+                                            </View>
+                                        ) : zapStreams.length ? (
+                                            <FlatList
+                                                data={zapStreams}
+                                                keyExtractor={(item) => String(item.stream_id)}
+                                                showsVerticalScrollIndicator={false}
+                                                contentContainerStyle={{paddingBottom: 24}}
+                                                initialNumToRender={12}
+                                                maxToRenderPerBatch={12}
+                                                windowSize={5}
+                                                removeClippedSubviews
+                                                renderItem={({item}) => {
+                                                    const icon = safeImageUri(item.stream_icon);
+                                                    const channelId = resolveXmltvChannelId(item);
+                                                    const listings =
+                                                        tvXmltvListingsByChannel[channelId] ?? [];
+                                                    const now = new Date();
+                                                    const listing =
+                                                        listings.find((candidate) => {
+                                                            const start = parseXmltvDate(candidate.start);
+                                                            const end = parseXmltvDate(candidate.end);
+                                                            return !!start && !!end && start <= now && end >= now;
+                                                        }) ?? listings[0] ?? null;
+                                                    const start = listing ? parseXmltvDate(listing.start) : null;
+                                                    const end = listing ? parseXmltvDate(listing.end) : null;
+                                                    const progress =
+                                                        start && end
+                                                            ? Math.min(
+                                                                1,
+                                                                Math.max(
+                                                                    0,
+                                                                    (Date.now() - start.getTime()) /
+                                                                        (end.getTime() - start.getTime())
+                                                                )
+                                                            )
+                                                            : null;
+                                                    const subtitle =
+                                                        start && end
+                                                            ? `${formatClock(start)} - ${formatClock(end)}`
+                                                            : tvEpgLoading
+                                                                ? 'Chargement...'
+                                                                : '';
+                                                    const title = listing?.title
+                                                        ? decodeEpgText(listing.title)
+                                                        : item.name;
+                                                    const meta = listing?.category
+                                                        ? decodeEpgText(listing.category)
+                                                        : item.stream_type ?? 'Divertissement';
+                                                    const metaLabel =
+                                                        meta && meta.toLowerCase() === 'live' ? '' : meta;
+                                                    return (
+                                                        <Pressable
+                                                            onPress={() => handleZapStreamPress(item)}
+                                                            className="border-b border-white/10 py-3"
+                                                        >
+                                                            <View className="flex-row items-center gap-3">
+                                                                <View className="relative h-12 w-20 items-center justify-center overflow-hidden rounded-md bg-white/5">
+                                                                    {icon ? (
+                                                                        <Image
+                                                                            source={{uri: icon}}
+                                                                            className="h-full w-full"
+                                                                            resizeMode="contain"
+                                                                        />
+                                                                    ) : (
+                                                                        <Text className="font-body text-[10px] text-white/70">
+                                                                            TV
+                                                                        </Text>
+                                                                    )}
+                                                                    {progress !== null ? (
+                                                                        <View className="absolute bottom-1 left-1 right-1 h-1 overflow-hidden rounded-full bg-white/25">
+                                                                            <View
+                                                                                className="h-full rounded-full bg-ember"
+                                                                                style={{
+                                                                                    width: `${Math.round(
+                                                                                        progress * 100
+                                                                                    )}%`,
+                                                                                }}
+                                                                            />
+                                                                        </View>
+                                                                    ) : null}
+                                                                </View>
+                                                                <View className="flex-1">
+                                                                    <Text
+                                                                        className="font-bodySemi text-xs text-white/70"
+                                                                        numberOfLines={1}
+                                                                    >
+                                                                        {item.name}
+                                                                    </Text>
+                                                                    <Text
+                                                                        className="mt-1 font-bodySemi text-sm text-white"
+                                                                        numberOfLines={2}
+                                                                    >
+                                                                        {title}
+                                                                    </Text>
+                                                                    <Text className="mt-1 font-body text-xs text-white/60">
+                                                                        {subtitle ? subtitle : ''}
+                                                                        {metaLabel ? ` • ${metaLabel}` : ''}
+                                                                    </Text>
+                                                                </View>
+                                                            </View>
+                                                        </Pressable>
+                                                    );
+                                                }}
+                                            />
+                                        ) : (
+                                            <Text className="font-body text-xs text-white/60">
+                                                Aucune chaîne dans cette catégorie.
+                                            </Text>
+                                        )}
+                                    </View>
+                                </>
+                            ) : null}
+                        </Animated.View>
+                    ) : null}
                 </View>
             ) : (
                 <View className="flex-1 items-center justify-center">
