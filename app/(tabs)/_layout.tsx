@@ -1,42 +1,30 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
-import { Tabs } from 'expo-router';
-
-const tabBarStyle = {
-  backgroundColor: '#0b0b0f',
-  borderTopColor: '#1b1b24',
-  borderTopWidth: 1,
-};
+import { NativeTabs, VectorIcon, Icon, Label } from 'expo-router/unstable-native-tabs';
 
 export default function TabLayout() {
-  return (
-    <Tabs
-      screenOptions={{
-        headerShown: false,
-        tabBarShowLabel: false,
-        tabBarStyle,
-        tabBarActiveTintColor: '#e50914',
-        tabBarInactiveTintColor: '#a7a7b3',
-      }}>
-      <Tabs.Screen
-        name="index"
-        options={{
-          tabBarIcon: ({ color }) => <Ionicons name="home" size={26} color={color} />,
-        }}
-      />
-      <Tabs.Screen
-        name="search"
-        options={{
-          tabBarIcon: ({ color }) => <Ionicons name="search" size={24} color={color} />,
-        }}
-      />
-      <Tabs.Screen
-        name="library"
-        options={{
-          tabBarIcon: ({ color }) => (
-            <Ionicons name="heart" size={24} color={color} />
-          ),
-        }}
-      />
-    </Tabs>
-  );
+    return (
+        <NativeTabs
+            backgroundColor="#0b0b0f"
+            shadowColor="#1b1b24"
+            iconColor={{ default: '#a7a7b3', selected: '#e50914' }}
+            labelStyle={{ default: { color: '#a7a7b3' }, selected: { color: '#e50914' } }}
+        >
+            <NativeTabs.Trigger name="index">
+                <Icon src={<VectorIcon family={Ionicons} name="home" />} />
+                <Label hidden />
+            </NativeTabs.Trigger>
+            <NativeTabs.Trigger name="search">
+                <Icon src={<VectorIcon family={Ionicons} name="search" />} />
+                <Label hidden />
+            </NativeTabs.Trigger>
+            <NativeTabs.Trigger name="library">
+                <Icon src={<VectorIcon family={Ionicons} name="heart" />} />
+                <Label hidden />
+            </NativeTabs.Trigger>
+            <NativeTabs.Trigger name="account">
+                <Icon src={<VectorIcon family={Ionicons} name="person" />} />
+                <Label hidden />
+            </NativeTabs.Trigger>
+        </NativeTabs>
+    );
 }

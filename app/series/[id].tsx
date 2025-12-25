@@ -1,0 +1,720 @@
+import Ionicons from '@expo/vector-icons/Ionicons';
+import {BlurView} from 'expo-blur';
+import {LinearGradient} from 'expo-linear-gradient';
+import * as WebBrowser from 'expo-web-browser';
+import {useLocalSearchParams, useRouter} from 'expo-router';
+import {useFocusEffect} from '@react-navigation/native';
+import {useCallback, useEffect, useMemo, useRef, useState} from 'react';
+import {Animated, FlatList, Image, Modal, Pressable, ScrollView, Text, useWindowDimensions, View,} from 'react-native';
+
+import MediaCard from '@/components/MediaCard';
+import {getDominantColor, safeImageUri} from '@/lib/media';
+import {getCredentials, getFavoriteItems, getResumeItems, toggleFavoriteItem} from '@/lib/storage';
+import {fetchSeries, fetchSeriesInfo} from '@/lib/xtream';
+import type {FavoriteItem, ResumeItem, XtreamEpisode, XtreamSeries, XtreamSeriesInfo} from '@/lib/types';
+
+export default function SeriesDetailScreen() {
+    const router = useRouter();
+    const {height} = useWindowDimensions();
+    const params = useLocalSearchParams<{ id?: string; name?: string }>();
+    const [loading, setLoading] = useState(true);
+    const [error, setError] = useState('');
+    const [seriesInfo, setSeriesInfo] = useState<XtreamSeriesInfo | null>(null);
+    const [seriesList, setSeriesList] = useState<XtreamSeries[]>([]);
+    const [favorites, setFavorites] = useState<FavoriteItem[]>([]);
+    const [resumeItems, setResumeItems] = useState<ResumeItem[]>([]);
+    const [resumeEntry, setResumeEntry] = useState<ResumeItem | null>(null);
+    const [resumeEpisode, setResumeEpisode] = useState<XtreamEpisode | null>(null);
+    const [heroTone, setHeroTone] = useState('#000000');
+    const [activeTab, setActiveTab] = useState<'episodes' | 'similar' | 'trailer'>('episodes');
+    const [seasonOptions, setSeasonOptions] = useState<number[]>([]);
+    const [season, setSeason] = useState<number | null>(null);
+    const [showFullPlot, setShowFullPlot] = useState(false);
+    const [showSeasonPicker, setShowSeasonPicker] = useState(false);
+    const [tabLayouts, setTabLayouts] = useState<{
+        episodes?: { x: number; width: number; pad: number };
+        similar?: { x: number; width: number; pad: number };
+        trailer?: { x: number; width: number; pad: number };
+    }>({});
+    const underlineX = useRef(new Animated.Value(0)).current;
+    const underlineWidth = useRef(new Animated.Value(0)).current;
+    const tabsScrollRef = useRef<ScrollView>(null);
+
+    const seriesId = Number(params.id ?? 0);
+    const heroHeight = Math.round(height * 0.3);
+
+    useEffect(() => {
+        let mounted = true;
+
+        async function load() {
+            try {
+                const creds = await getCredentials();
+                if (!creds || !seriesId) {
+                    router.replace('/login');
+                    return;
+                }
+                const [info, list, favs] = await Promise.all([
+                    fetchSeriesInfo(creds, seriesId),
+                    fetchSeries(creds),
+                    getFavoriteItems(),
+                ]);
+                if (!mounted) return;
+                setSeriesInfo(info);
+                setSeriesList(list);
+                setFavorites(favs);
+            } catch (err) {
+                if (!mounted) return;
+                setError(err instanceof Error ? err.message : 'Chargement impossible.');
+            } finally {
+                if (mounted) setLoading(false);
+            }
+        }
+
+        load();
+        return () => {
+            mounted = false;
+        };
+    }, [router, seriesId]);
+
+    const details = useMemo(() => seriesInfo?.info ?? {}, [seriesInfo]);
+    const trailer = details.trailer ?? details.youtube_trailer ?? '';
+    const trailerUrl = useMemo(() => normalizeTrailerUrl(trailer), [trailer]);
+    const trailerThumb = useMemo(() => getTrailerThumbnail(trailerUrl), [trailerUrl]);
+
+    const title = details.name ?? params.name ?? 'Série';
+    const cover = details.backdrop_path?.[0] ?? details.cover;
+    const safeCover = safeImageUri(cover);
+    const plot = details.plot ?? details.description ?? '';
+    const cast = details.cast ?? details.actors ?? '';
+    const genre = details.genre ?? '';
+    const rating = details.rating ? String(details.rating) : '';
+    const release = details.releaseDate ?? details.releasedate ?? '';
+    const releaseYear = release ? String(release).slice(0, 4) : '';
+    const metaParts = [releaseYear, genre, rating && `${rating}/10`]
+        .filter(Boolean)
+        .join(' • ');
+
+    const episodesBySeason = useMemo(() => seriesInfo?.episodes ?? {}, [seriesInfo]);
+
+    const refreshResume = useCallback(() => {
+        if (!seriesId) {
+            setResumeItems([]);
+            setResumeEntry(null);
+            setResumeEpisode(null);
+            return;
+        }
+        getResumeItems().then((items) => {
+            setResumeItems(items);
+            const matches = items.filter(
+                (item) => item.type === 'series' && item.seriesId === seriesId
+            );
+            if (!matches.length) {
+                setResumeEntry(null);
+                setResumeEpisode(null);
+                return;
+            }
+            const latest = matches.sort((a, b) => b.updatedAt - a.updatedAt)[0];
+            setResumeEntry(latest);
+            const seasonKey = latest.season ? String(latest.season) : null;
+            const list = seasonKey ? episodesBySeason[seasonKey] : null;
+            const found =
+                list?.find((episode) => String(episode.id) === String(latest.id)) ?? null;
+            setResumeEpisode(found);
+        });
+    }, [episodesBySeason, seriesId]);
+
+    useEffect(() => {
+        refreshResume();
+    }, [refreshResume]);
+
+    useFocusEffect(
+        useCallback(() => {
+            refreshResume();
+            return () => undefined;
+        }, [refreshResume])
+    );
+
+    useEffect(() => {
+        const seasons = Object.keys(episodesBySeason)
+            .map((key) => Number(key))
+            .filter((value) => !Number.isNaN(value))
+            .sort((a, b) => a - b);
+        setSeasonOptions(seasons);
+        if (season === null && seasons.length) {
+            setSeason(seasons[0]);
+        }
+    }, [episodesBySeason, season]);
+
+    const episodes = useMemo<XtreamEpisode[]>(() => {
+        if (season === null) return [];
+        const key = String(season);
+        return episodesBySeason[key] ?? [];
+    }, [episodesBySeason, season]);
+
+    const firstEpisode = useMemo(() => {
+        return episodes.find((item) => Number.isFinite(Number(item.id))) ?? null;
+    }, [episodes]);
+    const firstSeasonEpisode = useMemo(() => {
+        const firstSeason = seasonOptions[0];
+        if (firstSeason === undefined) return null;
+        return (
+            episodesBySeason[String(firstSeason)]?.find((item) =>
+                Number.isFinite(Number(item.id))
+            ) ?? null
+        );
+    }, [episodesBySeason, seasonOptions]);
+    const firstEpisodeOverall = useMemo(() => {
+        const seasons = Object.keys(episodesBySeason)
+            .map((key) => Number(key))
+            .filter((value) => !Number.isNaN(value))
+            .sort((a, b) => a - b);
+        for (const value of seasons) {
+            const episode =
+                episodesBySeason[String(value)]?.find((item) =>
+                    Number.isFinite(Number(item.id))
+                ) ?? null;
+            if (episode) {
+                return {episode, season: value};
+            }
+        }
+        return null;
+    }, [episodesBySeason]);
+
+    const resumeSeason = resumeEntry?.season ?? null;
+    const resumePlayable = resumeEpisode ?? null;
+    const hasResume = !!resumeEntry && !resumeEntry.completed;
+    const isCompleted = !!resumeEntry?.completed;
+    const playLabel = isCompleted ? 'Revoir' : hasResume ? 'Reprendre' : 'Lecture';
+
+    const similarItems = useMemo(() => {
+        const fallbackCategoryId = seriesList.find((item) => item.series_id === seriesId)?.category_id;
+        const categoryId = seriesInfo?.series?.category_id ?? fallbackCategoryId;
+        if (!categoryId) return [];
+        return seriesList
+            .filter((item) => item.category_id === categoryId && item.series_id !== seriesId)
+            .slice(0, 21);
+    }, [seriesId, seriesInfo, seriesList]);
+
+    const resumeEpisodeMap = useMemo(() => {
+        const map = new Map<number, ResumeItem>();
+        resumeItems
+            .filter((item) => item.type === 'series' && item.seriesId === seriesId)
+            .forEach((item) => map.set(Number(item.id), item));
+        return map;
+    }, [resumeItems, seriesId]);
+
+    useEffect(() => {
+        let active = true;
+        getDominantColor(safeCover).then((color) => {
+            if (!active) return;
+            setHeroTone(color ?? '#000000');
+        });
+        return () => {
+            active = false;
+        };
+    }, [safeCover]);
+
+    useEffect(() => {
+        const target =
+            activeTab === 'episodes'
+                ? tabLayouts.episodes
+                : activeTab === 'similar'
+                    ? tabLayouts.similar
+                    : tabLayouts.trailer;
+        if (!target) return;
+        Animated.parallel([
+            Animated.timing(underlineX, {
+                toValue: target.x,
+                duration: 220,
+                useNativeDriver: false,
+            }),
+            Animated.timing(underlineWidth, {
+                toValue: target.width - target.pad * 2,
+                duration: 220,
+                useNativeDriver: false,
+            }),
+        ]).start();
+    }, [activeTab, tabLayouts, underlineWidth, underlineX]);
+
+    const openSeasonPicker = () => {
+        if (!seasonOptions.length) return;
+        setShowSeasonPicker(true);
+    };
+
+    const isFavorite = favorites.some((fav) => fav.type === 'series' && fav.id === seriesId);
+    const handleToggleFavorite = async () => {
+        if (!seriesId) return;
+        const next = await toggleFavoriteItem('series', seriesId);
+        setFavorites(next);
+    };
+
+    const handlePlay = () => {
+        const target = resumePlayable ?? firstSeasonEpisode ?? firstEpisodeOverall?.episode ?? firstEpisode;
+        if (!target) return;
+        const start =
+            hasResume && !isCompleted ? Math.floor(resumeEntry?.positionSec ?? 0) : undefined;
+        router.push({
+            pathname: '/player/[id]' as const,
+            params: {
+                id: String(target.id),
+                name: title,
+                type: 'series',
+                ext: target.container_extension ?? 'mp4',
+                seriesId: String(seriesId),
+                season: resumePlayable
+                    ? resumeSeason !== null
+                        ? String(resumeSeason)
+                        : undefined
+                    : firstSeasonEpisode
+                        ? String(seasonOptions[0] ?? '')
+                        : firstEpisodeOverall
+                            ? String(firstEpisodeOverall.season)
+                            : season
+                                ? String(season)
+                                : undefined,
+                ...(start ? {start: String(start)} : {}),
+            },
+        });
+    };
+
+    if (!seriesId) {
+        return (
+            <View className="flex-1 items-center justify-center bg-black px-6">
+                <Text className="font-body text-ember">Série introuvable.</Text>
+            </View>
+        );
+    }
+
+    if (loading) {
+        return (
+            <View className="flex-1 items-center justify-center bg-black">
+                <Text className="font-body text-mist">Chargement...</Text>
+            </View>
+        );
+    }
+
+    if (error) {
+        return (
+            <View className="flex-1 items-center justify-center bg-black px-6">
+                <Text className="font-body text-ember">{error}</Text>
+            </View>
+        );
+    }
+
+    return (
+        <View className="flex-1 bg-black">
+            <LinearGradient
+                colors={[heroTone, '#000000']}
+                locations={[0, 1]}
+                style={{position: 'absolute', top: 0, left: 0, right: 0, height}}
+                pointerEvents="none"
+            />
+            <View style={{position: 'absolute', top: 0, left: 0, right: 0, height: heroHeight}}>
+                {safeCover ? (
+                    <Image source={{uri: safeCover}} resizeMode="cover" style={{height: '100%'}}/>
+                ) : (
+                    <LinearGradient colors={['#1b1b24', '#0b0b0f']} style={{height: '100%'}}/>
+                )}
+                <LinearGradient
+                    colors={['transparent', 'rgba(0,0,0,0.95)']}
+                    locations={[0.4, 1]}
+                    style={{position: 'absolute', left: 0, right: 0, bottom: 0, height: heroHeight}}
+                    pointerEvents="none"
+                />
+            </View>
+
+            <View className="absolute right-6 top-12 z-10">
+                <Pressable
+                    onPress={() => router.back()}
+                    className="h-10 w-10 items-center justify-center overflow-hidden rounded-full"
+                >
+                    <LinearGradient
+                        colors={['rgba(0,0,0,0.55)', 'rgba(0,0,0,0.25)']}
+                        className="absolute inset-0"
+                    />
+                    <Ionicons name="close" size={24} color="#ffffff"/>
+                </Pressable>
+            </View>
+
+            <ScrollView
+                className="bg-black"
+                style={{marginTop: heroHeight}}
+                contentContainerStyle={{paddingTop: 24, paddingBottom: 40}}
+                showsVerticalScrollIndicator={false}
+            >
+                <View className="px-6">
+                    <Text className="text-center font-bodySemi text-2xl uppercase tracking-[2px] text-white">
+                        {title}
+                    </Text>
+                    {metaParts ? (
+                        <Text className="mt-2 text-center font-body text-sm text-mist">{metaParts}</Text>
+                    ) : null}
+                    {resumeEntry ? (
+                        <View className="mt-3 items-center">
+                            <View className="rounded-full bg-white/10 px-4 py-1.5">
+                                <Text className="font-bodySemi text-xs uppercase tracking-[1px] text-white">
+                                    {isCompleted ? 'Déjà vu' : 'En cours de lecture'}
+                                </Text>
+                            </View>
+                        </View>
+                    ) : null}
+
+                    <View className="mt-5 flex-row items-center gap-3">
+                        <Pressable
+                            onPress={handlePlay}
+                            className="flex-1 flex-row items-center justify-center gap-2 rounded-xl bg-white py-3"
+                        >
+                            <Ionicons name="play" size={18} color="#111111"/>
+                            <Text className="font-bodySemi text-sm text-black">{playLabel}</Text>
+                        </Pressable>
+                        <Pressable
+                            onPress={handleToggleFavorite}
+                            className="flex-1 flex-row items-center justify-center gap-2 rounded-xl border border-white/15 bg-white/10 py-3"
+                        >
+                            <Ionicons name={isFavorite ? 'checkmark' : 'add'} size={18} color="#ffffff"/>
+                            <Text className="font-bodySemi text-sm text-white">Ma liste</Text>
+                        </Pressable>
+                    </View>
+
+                    <View className="mt-6">
+                        <Text className="font-bodySemi text-lg text-white">Synopsis</Text>
+                        <Text className="mt-2 font-body text-base text-mist">
+                            {plot
+                                ? showFullPlot
+                                    ? plot
+                                    : plot.slice(0, 300)
+                                : 'Synopsis indisponible.'}
+                            {plot && plot.length > 300 && !showFullPlot ? '…' : ''}
+                            {plot && plot.length > 300 ? (
+                                <Text
+                                    onPress={() => setShowFullPlot((prev) => !prev)}
+                                    className="font-bodySemi text-sm text-white">
+                                    {showFullPlot ? ' Voir moins' : ' Voir plus'}
+                                </Text>
+                            ) : null}
+                        </Text>
+                    </View>
+
+                    <View className="mt-6">
+                        <Text className="font-bodySemi text-lg text-white">Distribution</Text>
+                        <Text className="mt-2 font-body text-base text-mist">
+                            {cast ? cast : 'Distribution non renseignée.'}
+                        </Text>
+                    </View>
+
+                    <View className="mt-8">
+                        <ScrollView
+                            ref={tabsScrollRef}
+                            horizontal
+                            showsHorizontalScrollIndicator={false}
+                            contentContainerStyle={{gap: 24, paddingRight: 24}}
+                        >
+                            <View className="relative flex-row gap-10">
+                                <Pressable
+                                    onPress={() => {
+                                        setActiveTab('episodes');
+                                        const target = tabLayouts.episodes;
+                                        if (target) tabsScrollRef.current?.scrollTo({x: target.x, animated: true});
+                                    }}
+                                    onLayout={(event) => {
+                                        const {x, width} = event.nativeEvent.layout;
+                                        setTabLayouts((prev) => ({...prev, episodes: {x, width, pad: 10}}));
+                                    }}
+                                    className="pb-3"
+                                >
+                                    <Text
+                                        className={`pt-4 font-bodySemi text-xl ${
+                                            activeTab === 'episodes' ? 'text-white' : 'text-white/50'
+                                        }`}>
+                                        Épisodes
+                                    </Text>
+                                </Pressable>
+                                <Pressable
+                                    onPress={() => {
+                                        setActiveTab('similar');
+                                        const target = tabLayouts.similar;
+                                        if (target) tabsScrollRef.current?.scrollTo({x: target.x, animated: true});
+                                    }}
+                                    onLayout={(event) => {
+                                        const {x, width} = event.nativeEvent.layout;
+                                        setTabLayouts((prev) => ({...prev, similar: {x, width, pad: 10}}));
+                                    }}
+                                    className="pb-3"
+                                >
+                                    <Text
+                                        className={`pt-4 font-bodySemi text-xl ${
+                                            activeTab === 'similar' ? 'text-white' : 'text-white/50'
+                                        }`}>
+                                        Séries similaires
+                                    </Text>
+                                </Pressable>
+                                {trailerUrl ? (
+                                    <Pressable
+                                        onPress={() => {
+                                            setActiveTab('trailer');
+                                            const target = tabLayouts.trailer;
+                                            if (target) tabsScrollRef.current?.scrollTo({x: target.x, animated: true});
+                                        }}
+                                        onLayout={(event) => {
+                                            const {x, width} = event.nativeEvent.layout;
+                                            setTabLayouts((prev) => ({...prev, trailer: {x, width, pad: 10}}));
+                                        }}
+                                        className="pb-3"
+                                    >
+                                        <Text
+                                            className={`pt-4 font-bodySemi text-xl ${
+                                                activeTab === 'trailer' ? 'text-white' : 'text-white/50'
+                                            }`}>
+                                            Bande-annonce
+                                        </Text>
+                                    </Pressable>
+                                ) : null}
+                                <Animated.View
+                                    style={{
+                                        position: 'absolute',
+                                        top: 0,
+                                        height: 4,
+                                        borderRadius: 999,
+                                        backgroundColor: '#e50914',
+                                        transform: [{translateX: underlineX}],
+                                        width: underlineWidth,
+                                    }}
+                                />
+                            </View>
+                        </ScrollView>
+                    </View>
+                </View>
+
+                {activeTab === 'episodes' ? (
+                    <View className="mt-6 px-6">
+                        <View className="self-start">
+                            <Pressable
+                                onPress={openSeasonPicker}
+                                className="relative self-start rounded-xl bg-white/10 px-8 py-3"
+                            >
+                                <View className="flex-row items-center gap-2">
+                                    <Text className="font-bodySemi text-base text-white">
+                                        Saison {season ?? '-'}
+                                    </Text>
+                                    <Ionicons name="chevron-down" size={16} color="#ffffff"/>
+                                </View>
+                            </Pressable>
+                        </View>
+
+                        <FlatList
+                            data={episodes}
+                            keyExtractor={(item, index) => `ep-${item.id ?? index}`}
+                            scrollEnabled={false}
+                            contentContainerStyle={{paddingTop: 16, gap: 20}}
+                            renderItem={({item}) => (
+                                <Pressable
+                                    onPress={() =>
+                                        router.push({
+                                            pathname: '/player/[id]' as const,
+                                            params: {
+                                                id: String(item.id),
+                                                name: title,
+                                                type: 'series',
+                                                ext: item.container_extension ?? 'mp4',
+                                                seriesId: String(seriesId),
+                                                season: season ? String(season) : undefined,
+                                            },
+                                        })
+                                    }
+                                >
+                                    <View className="flex-row gap-4">
+                                        <View className="h-20 w-32 overflow-hidden rounded-xl bg-slate">
+                                            {safeImageUri(
+                                                item.info?.movie_image ??
+                                                item.info?.cover_big ??
+                                                item.info?.backdrop_path?.[0]
+                                            ) ? (
+                                                <Image
+                                                    source={{
+                                                        uri: safeImageUri(
+                                                            item.info?.movie_image ??
+                                                            item.info?.cover_big ??
+                                                            item.info?.backdrop_path?.[0]
+                                                        ),
+                                                    }}
+                                                    className="h-full w-full"
+                                                    resizeMode="cover"
+                                                />
+                                            ) : null}
+                                            <View className="absolute inset-0 items-center justify-center">
+                                                <View
+                                                    className="h-8 w-8 items-center justify-center rounded-full bg-black/60">
+                                                    <Ionicons name="play" size={16} color="#ffffff"/>
+                                                </View>
+                                            </View>
+                                            {(() => {
+                                                const resume = resumeEpisodeMap.get(Number(item.id));
+                                                if (!resume || !resume.durationSec) return null;
+                                                const progress = resume.positionSec / resume.durationSec;
+                                                if (progress <= 0) return null;
+                                                return (
+                                                    <View
+                                                        className="absolute bottom-1 left-1 right-1 h-1 overflow-hidden rounded-full bg-black/60">
+                                                        <View
+                                                            className="h-full bg-ember"
+                                                            style={{width: `${Math.min(100, progress * 100)}%`}}
+                                                        />
+                                                    </View>
+                                                );
+                                            })()}
+                                        </View>
+                                        <View className="flex-1 justify-center">
+                                            <Text className="font-bodySemi text-base text-white" numberOfLines={2}>
+                                                {item.title ?? item.name ?? `Episode ${item.episode_num ?? ''}`}
+                                            </Text>
+                                            {item.info?.duration ? (
+                                                <Text className="mt-1 font-body text-sm text-white/70">
+                                                    {item.info.duration}
+                                                </Text>
+                                            ) : null}
+                                        </View>
+                                    </View>
+                                    <Text className="mt-2 font-body text-sm text-mist" numberOfLines={3}>
+                                        {item.info?.plot ?? 'Description indisponible.'}
+                                    </Text>
+                                </Pressable>
+                            )}
+                        />
+                    </View>
+                ) : null}
+
+                {activeTab === 'similar' ? (
+                    <View className="mt-6 px-3">
+                        <FlatList
+                            data={similarItems}
+                            keyExtractor={(item) => String(item.series_id)}
+                            numColumns={3}
+                            scrollEnabled={false}
+                            columnWrapperStyle={{paddingHorizontal: 12, marginTop: 12}}
+                            renderItem={({item}) => (
+                                <MediaCard
+                                    title={item.name}
+                                    image={item.cover ?? item.backdrop_path?.[0]}
+                                    progress={(() => {
+                                        const resume = resumeItems.find(
+                                            (entry) =>
+                                                entry.type === 'series' &&
+                                                entry.seriesId === item.series_id
+                                        );
+                                        if (!resume || !resume.durationSec) return undefined;
+                                        return resume.positionSec / resume.durationSec;
+                                    })()}
+                                    size="grid"
+                                    onPress={() =>
+                                        router.push({
+                                            pathname: '/series/[id]' as const,
+                                            params: {id: String(item.series_id), name: item.name},
+                                        })
+                                    }
+                                />
+                            )}
+                        />
+                    </View>
+                ) : null}
+
+                {activeTab === 'trailer' && trailerUrl ? (
+                    <View className="mt-6 px-6">
+                        <Pressable
+                            onPress={() => WebBrowser.openBrowserAsync(trailerUrl)}
+                            className="overflow-hidden rounded-2xl border border-white/10 bg-black"
+                        >
+                            {trailerThumb ? (
+                                <Image source={{uri: trailerThumb}} className="h-64 w-full" resizeMode="cover"/>
+                            ) : (
+                                <LinearGradient colors={['#1b1b24', '#0b0b0f']} className="h-64 w-full"/>
+                            )}
+                            <View className="absolute inset-0 items-center justify-center">
+                                <View className="h-14 w-14 items-center justify-center rounded-full bg-black/60">
+                                    <Ionicons name="play" size={24} color="#ffffff"/>
+                                </View>
+                            </View>
+                        </Pressable>
+                    </View>
+                ) : null}
+            </ScrollView>
+
+            <Modal
+                transparent
+                visible={showSeasonPicker}
+                animationType="fade"
+                onRequestClose={() => setShowSeasonPicker(false)}
+            >
+                <Pressable
+                    onPress={() => setShowSeasonPicker(false)}
+                    className="flex-1 items-center justify-center"
+                >
+                    <BlurView intensity={40} tint="dark" className="absolute inset-0"/>
+                    <View className="max-h-[60vh] w-full items-center justify-center">
+                        <ScrollView
+                            contentContainerStyle={{
+                                alignItems: 'center',
+                                paddingVertical: 12,
+                                flexGrow: 1,
+                                justifyContent: 'center',
+                            }}
+                        >
+                            <View className="items-center gap-4">
+                                {seasonOptions.map((value) => {
+                                    const selected = season === value;
+                                    return (
+                                        <Pressable
+                                            key={`season-${value}`}
+                                            onPress={() => {
+                                                setSeason(value);
+                                                setShowSeasonPicker(false);
+                                            }}
+                                            className="rounded-full px-6 py-3"
+                                        >
+                                            <Text
+                                                className={`font-bodySemi text-xl ${
+                                                    selected ? 'text-white' : 'text-white/60'
+                                                }`}
+                                            >
+                                                Saison {value}
+                                            </Text>
+                                        </Pressable>
+                                    );
+                                })}
+                            </View>
+                        </ScrollView>
+                    </View>
+                </Pressable>
+            </Modal>
+        </View>
+    );
+}
+
+function normalizeTrailerUrl(trailer?: string) {
+    if (!trailer) return '';
+    const trimmed = trailer.trim();
+    if (!trimmed) return '';
+    const isIdOnly = /^[a-zA-Z0-9_-]{10,14}$/.test(trimmed);
+    if (isIdOnly) {
+        return `https://www.youtube.com/watch?v=${trimmed}`;
+    }
+    const withScheme = /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
+    if (withScheme.includes('youtube.com') || withScheme.includes('youtu.be')) {
+        const id = extractYouTubeId(withScheme);
+        return id ? `https://www.youtube.com/watch?v=${id}` : withScheme;
+    }
+    return withScheme;
+}
+
+function extractYouTubeId(url: string) {
+    const match =
+        url.match(/[?&]v=([^&]+)/i) ||
+        url.match(/youtu\.be\/([^?&]+)/i) ||
+        url.match(/youtube\.com\/embed\/([^?&]+)/i);
+    return match ? match[1] : null;
+}
+
+function getTrailerThumbnail(url?: string) {
+    if (!url) return '';
+    const id = extractYouTubeId(url);
+    return id ? `https://img.youtube.com/vi/${id}/hqdefault.jpg` : '';
+}
