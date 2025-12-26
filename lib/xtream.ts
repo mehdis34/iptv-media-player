@@ -9,6 +9,7 @@ import type {
   XtreamEpgListing,
 } from './types';
 import {XMLParser} from 'fast-xml-parser';
+import {normalizeXmltvName} from './epg.utils';
 
 function normalizeHost(host: string) {
   return host.trim().replace(/\/+$/, '');
@@ -145,23 +146,6 @@ export async function fetchSeriesInfo(creds: XtreamCredentials, seriesId: number
   return (await res.json()) as XtreamSeriesInfo;
 }
 
-export async function fetchShortEpg(
-  creds: XtreamCredentials,
-  streamId: number,
-  limit = 8
-) {
-  const url = buildApiUrl(creds, {
-    action: 'get_short_epg',
-    stream_id: String(streamId),
-    limit: String(limit),
-  });
-  const res = await fetch(url);
-  if (!res.ok) {
-    throw new Error("Impossible de charger l'EPG.");
-  }
-  return (await res.json()) as { epg_listings?: XtreamEpgListing[] };
-}
-
 const xmlParser = new XMLParser({
   ignoreAttributes: false,
   attributeNamePrefix: '',
@@ -170,11 +154,6 @@ const xmlParser = new XMLParser({
   parseAttributeValue: false,
   trimValues: true,
 });
-
-function normalizeXmltvName(value?: string) {
-  if (!value) return '';
-  return value.toLowerCase().replace(/[^a-z0-9]/g, '');
-}
 
 function getXmltvText(node: unknown): string {
   if (node === null || node === undefined) return '';

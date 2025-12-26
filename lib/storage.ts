@@ -80,27 +80,9 @@ export async function getFavorites(): Promise<number[]> {
   return raw ? (JSON.parse(raw) as number[]) : [];
 }
 
-export async function toggleFavorite(streamId: number) {
-  const favorites = await getFavorites();
-  const next = favorites.includes(streamId)
-    ? favorites.filter((id) => id !== streamId)
-    : [...favorites, streamId];
-  await AsyncStorage.setItem(STORAGE_KEYS.favorites, JSON.stringify(next));
-  return next;
-}
-
 export async function getSeriesFavorites(): Promise<number[]> {
   const raw = await AsyncStorage.getItem(STORAGE_KEYS.seriesFavorites);
   return raw ? (JSON.parse(raw) as number[]) : [];
-}
-
-export async function toggleSeriesFavorite(seriesId: number) {
-  const favorites = await getSeriesFavorites();
-  const next = favorites.includes(seriesId)
-    ? favorites.filter((id) => id !== seriesId)
-    : [...favorites, seriesId];
-  await AsyncStorage.setItem(STORAGE_KEYS.seriesFavorites, JSON.stringify(next));
-  return next;
 }
 
 type FavoritesByProfile = Record<string, FavoriteItem[]>;
@@ -122,6 +104,14 @@ type CatalogCache = {
 };
 type CatalogCacheEntry = { updatedAt: number; data: CatalogCache[CatalogCacheKey] };
 type CatalogCacheMap = Record<string, Partial<Record<CatalogCacheKey, CatalogCacheEntry>>>;
+
+function setCatalogCacheData<K extends CatalogCacheKey>(
+  target: Partial<CatalogCache>,
+  key: K,
+  value: CatalogCache[K]
+) {
+  target[key] = value;
+}
 
 export async function getFavoriteItems(): Promise<FavoriteItem[]> {
   const profileId = await getActiveProfileId();
@@ -163,14 +153,6 @@ export async function toggleFavoriteItem(type: FavoriteItem['type'], id: number)
   return next;
 }
 
-export async function setFavoriteItems(items: FavoriteItem[]) {
-  const profileId = await getActiveProfileId();
-  if (!profileId) return;
-  const map = await getFavoritesMap(profileId);
-  map[profileId] = items;
-  await setFavoritesMap(map);
-}
-
 export async function getResumeItems(): Promise<ResumeItem[]> {
   const profileId = await getActiveProfileId();
   if (!profileId) return [];
@@ -200,15 +182,6 @@ export async function upsertResumeItem(item: ResumeItem) {
     items.push(item);
   }
   map[profileId] = items;
-  await setResumeMap(map);
-}
-
-export async function clearResumeItem(type: ResumeItem['type'], id: number) {
-  const profileId = await getActiveProfileId();
-  if (!profileId) return;
-  const map = await getResumeMap(profileId);
-  const items = map[profileId] ?? [];
-  map[profileId] = items.filter((entry) => !(entry.type === type && entry.id === id));
   await setResumeMap(map);
 }
 
@@ -342,7 +315,7 @@ export async function getCatalogCache(): Promise<{
   (Object.keys(entries) as CatalogCacheKey[]).forEach((key) => {
     const entry = entries[key];
     if (!entry) return;
-    data[key] = entry.data as CatalogCache[CatalogCacheKey];
+    setCatalogCacheData(data, key, entry.data as CatalogCache[typeof key]);
     updatedAt[key] = entry.updatedAt;
   });
   return { data, updatedAt };

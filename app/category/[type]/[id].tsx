@@ -15,6 +15,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import ChannelCard from '@/components/ChannelCard';
 import FeaturedCard from '@/components/FeaturedCard';
 import MediaCard from '@/components/MediaCard';
+import MediaGrid from '@/components/MediaGrid';
 import SectionHeader from '@/components/SectionHeader';
 import { getDominantColor } from '@/lib/media';
 import {
@@ -25,8 +26,9 @@ import {
   setCatalogCache,
   toggleFavoriteItem,
 } from '@/lib/storage';
-import { fetchLiveStreams, fetchSeries, fetchSeriesInfo, fetchVodStreams } from '@/lib/xtream';
+import { fetchLiveStreams, fetchSeries, fetchVodStreams } from '@/lib/xtream';
 import type { FavoriteItem, ResumeItem, XtreamSeries, XtreamStream, XtreamVod } from '@/lib/types';
+import { handlePlaySeries as handlePlaySeriesFromUtils } from '@/lib/series.utils';
 
 type RouteParams = {
   type?: 'tv' | 'movies' | 'series';
@@ -50,47 +52,7 @@ export default function CategoryScreen() {
 
   const handlePlaySeries = useCallback(
     async (seriesId: number, seriesName: string) => {
-      try {
-        const creds = await getCredentials();
-        if (!creds) {
-          router.replace('/login');
-          return;
-        }
-        const info = await fetchSeriesInfo(creds, seriesId);
-        const episodesBySeason = info.episodes ?? {};
-        const seasons = Object.keys(episodesBySeason)
-          .map((key) => Number(key))
-          .filter((value) => !Number.isNaN(value))
-          .sort((a, b) => a - b);
-        const firstSeason = seasons[0];
-        const firstEpisode =
-          firstSeason !== undefined
-            ? episodesBySeason[String(firstSeason)]?.find((ep) => ep.id)
-            : undefined;
-        if (!firstEpisode) {
-          router.push({
-            pathname: '/series/[id]' as const,
-            params: { id: String(seriesId), name: seriesName },
-          });
-          return;
-        }
-        router.push({
-          pathname: '/player/[id]' as const,
-          params: {
-            id: String(firstEpisode.id),
-            name: seriesName,
-            type: 'series',
-            ext: firstEpisode.container_extension ?? 'mp4',
-            seriesId: String(seriesId),
-            season: firstSeason !== undefined ? String(firstSeason) : undefined,
-          },
-        });
-      } catch (_err) {
-        router.push({
-          pathname: '/series/[id]' as const,
-          params: { id: String(seriesId), name: seriesName },
-        });
-      }
+      await handlePlaySeriesFromUtils(router, seriesId, seriesName);
     },
     [router]
   );
@@ -327,14 +289,14 @@ export default function CategoryScreen() {
           removeClippedSubviews
         />
       ) : (
-        <FlatList<XtreamVod | XtreamSeries>
+        <MediaGrid<XtreamVod | XtreamSeries>
           className="flex-1"
           data={mediaItems}
           keyExtractor={(item) =>
             isVod(item) ? `vod-${item.stream_id}` : `series-${item.series_id}`
           }
-          numColumns={3}
           columnWrapperStyle={{ paddingHorizontal: 12, marginBottom: 12 }}
+          scrollEnabled
           ListHeaderComponent={
             <View className="px-6 pb-6">
               {latest ? (

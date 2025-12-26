@@ -6,13 +6,14 @@ import {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {BlurView} from 'expo-blur';
 import {ActivityIndicator, Animated, FlatList, Image, Modal, Pressable, ScrollView, SectionList, StyleSheet, Text, useWindowDimensions, View} from 'react-native';
 import Slider from '@react-native-community/slider';
-import {Buffer} from 'buffer';
 
 import {getCatalogCache, getCredentials, getFavoriteItems, getResumeItem, toggleFavoriteItem, upsertResumeItem} from '@/lib/storage';
 import {buildSeriesEpisodeUrl, buildStreamUrl, buildVodUrl, fetchLiveCategories, fetchLiveStreams, fetchSeriesInfo, fetchXmltvEpg} from '@/lib/xtream';
 import {VLCPlayer} from 'react-native-vlc-media-player';
 import type {FavoriteItem, ResumeItem, XtreamCategory, XtreamEpisode, XtreamEpgListing, XtreamSeriesInfo, XtreamStream} from '@/lib/types';
 import {safeImageUri} from '@/lib/media';
+import {decodeEpgText, normalizeXmltvName, parseXmltvDate, resolveXmltvChannelId as resolveXmltvChannelIdFromStream} from '@/lib/epg.utils';
+import {formatDayLabel} from '@/lib/date.utils';
 
 export default function PlayerScreen() {
     const router = useRouter();
@@ -273,33 +274,6 @@ export default function PlayerScreen() {
     }, [activeSidePanel, isLive]);
 
     useEffect(() => {
-        if (!isLive || activeSidePanel !== 'zap' || zapCategoryId) {
-            return;
-        }
-        let active = true;
-        async function selectDefaultCategory() {
-            let categoryId =
-                typeof params.categoryId === 'string' && params.categoryId.trim()
-                    ? params.categoryId
-                    : null;
-            if (!categoryId && params.id) {
-                const cache = await getCatalogCache();
-                const streamId = Number(params.id);
-                const stream = cache.data.liveStreams?.find(
-                    (item) => item.stream_id === streamId
-                );
-                categoryId = stream?.category_id ?? null;
-            }
-            if (!active || !categoryId) return;
-            await handleSelectZapCategory(categoryId);
-        }
-        selectDefaultCategory();
-        return () => {
-            active = false;
-        };
-    }, [activeSidePanel, handleSelectZapCategory, isLive, params.categoryId, params.id, zapCategoryId]);
-
-    useEffect(() => {
         if (!params.id) {
             setResumeEntry(null);
             return;
@@ -404,7 +378,6 @@ export default function PlayerScreen() {
 
     useEffect(() => {
         if (params.type === 'series' && currentEpisodeIndex >= 0) {
-            // keep for debugging if needed
         }
     }, [currentEpisodeIndex, params.type]);
 
@@ -558,69 +531,12 @@ export default function PlayerScreen() {
         return `${hours}h${minutes}`;
     }
 
-    function parseXmltvDate(value?: string | null) {
-        if (!value) return null;
-        const match = value.match(/^(\d{14})/);
-        if (match) {
-            const compact = match[1];
-            const year = Number(compact.slice(0, 4));
-            const month = Number(compact.slice(4, 6)) - 1;
-            const day = Number(compact.slice(6, 8));
-            const hour = Number(compact.slice(8, 10));
-            const minute = Number(compact.slice(10, 12));
-            const second = Number(compact.slice(12, 14));
-            return new Date(year, month, day, hour, minute, second);
-        }
-        const parsed = new Date(value);
-        return Number.isNaN(parsed.getTime()) ? null : parsed;
-    }
-
-    function normalizeXmltvName(value: string) {
-        return value.toLowerCase().replace(/[^a-z0-9]/g, '');
-    }
-
-    const decodeEpgText = (value?: string | null) => {
-        if (!value) return '';
-        const trimmed = value.trim();
-        if (!/^[A-Za-z0-9+/=]+$/.test(trimmed) || trimmed.length % 4 !== 0) {
-            return value;
-        }
-        try {
-            const decoded = Buffer.from(trimmed, 'base64').toString('utf8').trim();
-            if (!decoded) return value;
-            const nonPrintableRatio =
-                decoded.replace(/[\x20-\x7E\u00A0-\u00FF]/g, '').length / decoded.length;
-            return nonPrintableRatio > 0.3 ? value : decoded;
-        } catch {
-            return value;
-        }
-    };
-
     const resolveXmltvChannelId = useCallback(
         (stream: XtreamStream) => {
-            if (stream.epg_channel_id) return stream.epg_channel_id;
-            if (stream.epg_id) return stream.epg_id;
-            const normalized = normalizeXmltvName(stream.name);
-            return tvXmltvChannelIdByName[normalized] ?? String(stream.stream_id);
+            return resolveXmltvChannelIdFromStream(stream, tvXmltvChannelIdByName);
         },
         [tvXmltvChannelIdByName]
     );
-
-    const formatDayLabel = (date: Date, today: Date) => {
-        const startOfDay = (value: Date) =>
-            new Date(value.getFullYear(), value.getMonth(), value.getDate()).getTime();
-        const target = startOfDay(date);
-        const base = startOfDay(today);
-        const diffDays = Math.round((target - base) / (24 * 60 * 60 * 1000));
-        if (diffDays === 0) return "Aujourd'hui";
-        if (diffDays === 1) return 'Demain';
-        if (diffDays === 2) return 'Après-demain';
-        return date.toLocaleDateString('fr-FR', {
-            weekday: 'long',
-            day: 'numeric',
-            month: 'long',
-        });
-    };
 
     const buildEpgSections = (listings: XtreamEpgListing[]) => {
         const today = new Date();
@@ -712,6 +628,33 @@ export default function PlayerScreen() {
         },
         [zapStreamsByCategory]
     );
+
+    useEffect(() => {
+        if (!isLive || activeSidePanel !== 'zap' || zapCategoryId) {
+            return;
+        }
+        let active = true;
+        async function selectDefaultCategory() {
+            let categoryId =
+                typeof params.categoryId === 'string' && params.categoryId.trim()
+                    ? params.categoryId
+                    : null;
+            if (!categoryId && params.id) {
+                const cache = await getCatalogCache();
+                const streamId = Number(params.id);
+                const stream = cache.data.liveStreams?.find(
+                    (item) => item.stream_id === streamId
+                );
+                categoryId = stream?.category_id ?? null;
+            }
+            if (!active || !categoryId) return;
+            await handleSelectZapCategory(categoryId);
+        }
+        selectDefaultCategory();
+        return () => {
+            active = false;
+        };
+    }, [activeSidePanel, handleSelectZapCategory, isLive, params.categoryId, params.id, zapCategoryId]);
 
     const handleZapStreamPress = useCallback(
         (stream: XtreamStream) => {

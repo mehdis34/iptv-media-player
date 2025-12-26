@@ -61,6 +61,7 @@ function RootLayoutNav() {
             <Stack screenOptions={{headerShown: false, gestureEnabled: true}}>
                 <Stack.Screen name="(tabs)"/>
                 <Stack.Screen name="login"/>
+                <Stack.Screen name="profiles"/>
                 <Stack.Screen name="modal" options={{presentation: 'modal'}}/>
                 <Stack.Screen name="category/[type]/[id]"/>
                 <Stack.Screen name="movie/[id]" options={{presentation: 'modal'}}/>

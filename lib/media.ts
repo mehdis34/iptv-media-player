@@ -9,43 +9,6 @@ export function safeImageUri(uri?: string) {
   return undefined;
 }
 
-export function getLatestMedia(vod: XtreamVod[], series: XtreamSeries[]) {
-  const latestVod = vod[vod.length - 1];
-  const latestSeries = series[series.length - 1];
-
-  if (!latestVod && !latestSeries) return null;
-  if (latestVod && !latestSeries) {
-    return {
-      title: latestVod.name,
-      image: safeImageUri(latestVod.cover ?? latestVod.stream_icon),
-      badge: 'Film',
-    };
-  }
-  if (latestSeries && !latestVod) {
-    return {
-      title: latestSeries.name,
-      image: safeImageUri(latestSeries.cover ?? latestSeries.backdrop_path?.[0]),
-      badge: 'Série',
-    };
-  }
-
-  const vodAdded = Number(latestVod?.added ?? 0);
-  const seriesAdded = Number(latestSeries?.added ?? 0);
-  const useSeries = seriesAdded >= vodAdded;
-  if (useSeries) {
-    return {
-      title: latestSeries!.name,
-      image: safeImageUri(latestSeries!.cover ?? latestSeries!.backdrop_path?.[0]),
-      badge: 'Série',
-    };
-  }
-  return {
-    title: latestVod!.name,
-    image: safeImageUri(latestVod!.cover ?? latestVod!.stream_icon),
-    badge: 'Film',
-  };
-}
-
 export function getLatestVod(vod: XtreamVod[]) {
   const latestVod = vod[vod.length - 1];
   if (!latestVod) return null;

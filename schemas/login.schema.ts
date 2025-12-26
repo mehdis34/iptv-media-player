@@ -12,7 +12,7 @@ export const loginSchema = z.object({
   host: z
     .string()
     .trim()
-    .min(1, "L'hote est obligatoire."),
+    .min(1, "L'hôte est obligatoire."),
   username: z
     .string()
     .trim()
