@@ -13,8 +13,16 @@ import ResumeStatusPill from '@/components/ResumeStatusPill';
 import SynopsisBlock from '@/components/SynopsisBlock';
 import TrailerCard from '@/components/TrailerCard';
 import UnderlineTabs from '@/components/UnderlineTabs';
+import {CATALOG_CACHE_TTL_MS} from '@/lib/catalog.utils';
 import {getDominantColor, safeImageUri} from '@/lib/media';
-import {getCredentials, getFavoriteItems, getResumeItems, toggleFavoriteItem} from '@/lib/storage';
+import {
+    getCatalogCache,
+    getCredentials,
+    getFavoriteItems,
+    getResumeItems,
+    setCatalogCache,
+    toggleFavoriteItem,
+} from '@/lib/storage';
 import {buildTrailerMeta} from '@/lib/trailer.utils';
 import {fetchSeries, fetchSeriesInfo} from '@/lib/xtream';
 import type {FavoriteItem, ResumeItem, XtreamEpisode, XtreamSeries, XtreamSeriesInfo} from '@/lib/types';
@@ -59,20 +67,41 @@ export default function SeriesDetailScreen() {
                     router.replace('/login');
                     return;
                 }
-                const [info, list, favs] = await Promise.all([
+                const cache = await getCatalogCache(['seriesList']);
+                if (!mounted) return;
+                if (cache.data.seriesList) {
+                    setSeriesList(cache.data.seriesList);
+                }
+                const [info, favs] = await Promise.all([
                     fetchSeriesInfo(creds, seriesId),
-                    fetchSeries(creds),
                     getFavoriteItems(),
                 ]);
                 if (!mounted) return;
                 setSeriesInfo(info);
-                setSeriesList(list);
                 setFavorites(favs);
+                setLoading(false);
+
+                const now = Date.now();
+                const cacheFresh =
+                    cache.updatedAt.seriesList &&
+                    now - cache.updatedAt.seriesList < CATALOG_CACHE_TTL_MS;
+                if (!cacheFresh) {
+                    try {
+                        const list = await fetchSeries(creds);
+                        if (!mounted) return;
+                        setSeriesList(list);
+                        await setCatalogCache({seriesList: list});
+                    } catch {
+                        if (!mounted) return;
+                        if (!cache.data.seriesList?.length) {
+                            setError('Chargement impossible.');
+                        }
+                    }
+                }
             } catch (err) {
                 if (!mounted) return;
                 setError(err instanceof Error ? err.message : 'Chargement impossible.');
-            } finally {
-                if (mounted) setLoading(false);
+                setLoading(false);
             }
         }
 

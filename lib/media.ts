@@ -51,6 +51,28 @@ export async function getDominantColor(uri?: string) {
   }
 }
 
+export async function ensureLogoTone(
+  logoUri: string,
+  state: {
+    cache: Record<string, string>;
+    pending: Set<string>;
+    setCache: (updater: (prev: Record<string, string>) => Record<string, string>) => void;
+  }
+) {
+  if (state.cache[logoUri] || state.pending.has(logoUri)) return;
+  state.pending.add(logoUri);
+  try {
+    const tone = await getDominantColor(logoUri);
+    if (tone) {
+      state.setCache((prev) => ({ ...prev, [logoUri]: tone }));
+    }
+  } catch {
+    // Ignore logo tone failures.
+  } finally {
+    state.pending.delete(logoUri);
+  }
+}
+
 function darkenHex(hex: string, amount: number) {
   const clean = hex.replace('#', '');
   if (clean.length !== 6) return hex;

@@ -1,10 +1,25 @@
 import {useRouter} from 'expo-router';
 import {useFocusEffect} from '@react-navigation/native';
-import {useCallback, useRef, useState} from 'react';
-import {ActivityIndicator, Pressable, Text, View} from 'react-native';
+import {useCallback, useMemo, useRef, useState} from 'react';
+import {ActivityIndicator, FlatList, Pressable, ScrollView, Text, View} from 'react-native';
 
+import FeaturedCard from '@/components/FeaturedCard';
+import MediaCard from '@/components/MediaCard';
+import SectionHeader from '@/components/SectionHeader';
+import TvRowContent from '@/components/TvRowContent';
 import {EPG_CACHE_TTL_MS, getEpgCache, isEpgCacheFresh, setEpgCache} from '@/lib/epg-cache';
-import {getActiveProfileId, getCatalogCache, getCredentials, setCatalogCache} from '@/lib/storage';
+import {useFavoritesAndResumesState} from '@/lib/catalog.hooks';
+import {CATALOG_CACHE_TTL_MS} from '@/lib/catalog.utils';
+import {ensureLogoTone as ensureLogoToneCached, getLatestSeries, getLatestVod} from '@/lib/media';
+import {
+    getActiveProfileId,
+    getCatalogCache,
+    getCredentials,
+    getFavoriteItems,
+    getResumeItems,
+    setCatalogCache,
+    toggleFavoriteItem,
+} from '@/lib/storage';
 import {
     fetchLiveCategories,
     fetchLiveStreams,
@@ -14,29 +29,44 @@ import {
     fetchVodStreams,
     fetchXmltvEpg,
 } from '@/lib/xtream';
+import {getTvNowInfo} from '@/lib/tv.utils';
+import type {FavoriteItem, ResumeItem, XtreamEpgListing, XtreamSeries, XtreamStream, XtreamVod} from '@/lib/types';
 
 export default function HomeScreen() {
     const router = useRouter();
     const prefetchingRef = useRef(false);
     const lastPrefetchProfileRef = useRef<string | null>(null);
-    const catalogCacheTtl = 6 * 60 * 60 * 1000;
     const [isPrefetching, setIsPrefetching] = useState(false);
+    const [vodStreams, setVodStreams] = useState<XtreamVod[]>([]);
+    const [seriesList, setSeriesList] = useState<XtreamSeries[]>([]);
+    const [liveStreams, setLiveStreams] = useState<XtreamStream[]>([]);
+    const {favorites, setFavorites, resumeItems, setResumeItems} = useFavoritesAndResumesState();
+    const [tvXmltvListings, setTvXmltvListings] = useState<Record<string, XtreamEpgListing[]>>({});
+    const [tvXmltvChannelIdByName, setTvXmltvChannelIdByName] = useState<Record<string, string>>(
+        {}
+    );
+    const [logoToneByUri, setLogoToneByUri] = useState<Record<string, string>>({});
+    const pendingLogoTones = useRef(new Set<string>());
+    const [loading, setLoading] = useState(true);
+    const [error, setError] = useState('');
+    const [prefetchMessage, setPrefetchMessage] = useState('Chargement du catalogue...');
+
+    const formatPrefetchMessage = (labels: string[]) => {
+        if (!labels.length) return 'Chargement du catalogue...';
+        if (labels.length === 1) return `Chargement ${labels[0]}...`;
+        if (labels.length === 2) return `Chargement ${labels[0]} et ${labels[1]}...`;
+        return `Chargement ${labels.slice(0, -1).join(', ')} et ${labels.at(-1)}...`;
+    };
 
     useFocusEffect(
         useCallback(() => {
             let mounted = true;
 
             async function prefetch() {
-                if (mounted) {
-                    setIsPrefetching(true);
-                }
                 const profileId = await getActiveProfileId();
                 const profileKey = profileId ?? 'default';
                 const profileChanged = lastPrefetchProfileRef.current !== profileKey;
                 if (prefetchingRef.current && !profileChanged) {
-                    if (mounted) {
-                        setIsPrefetching(false);
-                    }
                     return;
                 }
                 prefetchingRef.current = true;
@@ -44,37 +74,54 @@ export default function HomeScreen() {
                 try {
                     const creds = await getCredentials();
                     if (!creds) return;
-                    const cache = await getCatalogCache();
+                    const cache = await getCatalogCache([
+                        'liveCategories',
+                        'liveStreams',
+                        'vodCategories',
+                        'vodStreams',
+                        'seriesCategories',
+                        'seriesList',
+                    ]);
                     const now = Date.now();
                     const liveCacheFresh =
                         cache.updatedAt.liveCategories &&
                         cache.updatedAt.liveStreams &&
-                        now - cache.updatedAt.liveCategories < catalogCacheTtl &&
-                        now - cache.updatedAt.liveStreams < catalogCacheTtl;
+                        now - cache.updatedAt.liveCategories < CATALOG_CACHE_TTL_MS &&
+                        now - cache.updatedAt.liveStreams < CATALOG_CACHE_TTL_MS;
                     const vodCacheFresh =
                         cache.updatedAt.vodCategories &&
                         cache.updatedAt.vodStreams &&
-                        now - cache.updatedAt.vodCategories < catalogCacheTtl &&
-                        now - cache.updatedAt.vodStreams < catalogCacheTtl;
+                        now - cache.updatedAt.vodCategories < CATALOG_CACHE_TTL_MS &&
+                        now - cache.updatedAt.vodStreams < CATALOG_CACHE_TTL_MS;
                     const seriesCacheFresh =
                         cache.updatedAt.seriesCategories &&
                         cache.updatedAt.seriesList &&
-                        now - cache.updatedAt.seriesCategories < catalogCacheTtl &&
-                        now - cache.updatedAt.seriesList < catalogCacheTtl;
+                        now - cache.updatedAt.seriesCategories < CATALOG_CACHE_TTL_MS &&
+                        now - cache.updatedAt.seriesList < CATALOG_CACHE_TTL_MS;
                     let liveStreams = cache.data.liveStreams ?? [];
                     let vodStreams = cache.data.vodStreams ?? [];
                     let seriesList = cache.data.seriesList ?? [];
 
-                    const cachedEpg = getEpgCache(profileId);
+                    const cachedEpg = await getEpgCache(profileId);
                     const needsEpg = !cachedEpg || !isEpgCacheFresh(cachedEpg, EPG_CACHE_TTL_MS);
                     const needsCatalog = !liveCacheFresh || !vodCacheFresh || !seriesCacheFresh;
 
                     if (!needsCatalog && !needsEpg) {
                         return;
                     }
+                    if (mounted) {
+                        const targets: string[] = [];
+                        if (!liveCacheFresh) targets.push('TV');
+                        if (!vodCacheFresh) targets.push('films');
+                        if (!seriesCacheFresh) targets.push('series');
+                        if (needsEpg) targets.push('guide TV');
+                        setPrefetchMessage(formatPrefetchMessage(targets));
+                        setIsPrefetching(true);
+                    }
 
                     const tasks: Promise<void>[] = [];
                     if (!liveCacheFresh) {
+                        if (mounted) setPrefetchMessage('Chargement des chaînes TV...');
                         const [cats, live] = await Promise.all([
                             fetchLiveCategories(creds),
                             fetchLiveStreams(creds),
@@ -85,6 +132,7 @@ export default function HomeScreen() {
                     }
 
                     if (!vodCacheFresh) {
+                        if (mounted) setPrefetchMessage('Chargement des films...');
                         const [vodCats, vod] = await Promise.all([
                             fetchVodCategories(creds),
                             fetchVodStreams(creds),
@@ -95,6 +143,7 @@ export default function HomeScreen() {
                     }
 
                     if (!seriesCacheFresh) {
+                        if (mounted) setPrefetchMessage('Chargement des séries...');
                         const [seriesCats, series] = await Promise.all([
                             fetchSeriesCategories(creds),
                             fetchSeries(creds),
@@ -110,15 +159,23 @@ export default function HomeScreen() {
 
                     if (!liveStreams.length && !vodStreams.length && !seriesList.length) return;
                     if (needsEpg) {
+                        if (mounted) setPrefetchMessage('Chargement du guide TV...');
                         const xmltv = await fetchXmltvEpg(creds);
                         if (!mounted) return;
-                        setEpgCache(profileId, {
+                        await setEpgCache(profileId, {
                             listingsByChannel: xmltv.listingsByChannel ?? {},
                             channelIdByName: xmltv.channelIdByName ?? {},
                         });
                     }
+
+                    if (mounted) {
+                        setLiveStreams(liveStreams);
+                        setVodStreams(vodStreams);
+                        setSeriesList(seriesList);
+                    }
                 } finally {
                     if (mounted) {
+                        setPrefetchMessage('Chargement du catalogue...');
                         setIsPrefetching(false);
                     }
                     prefetchingRef.current = false;
@@ -133,35 +190,506 @@ export default function HomeScreen() {
         }, [])
     );
 
+    useFocusEffect(
+        useCallback(() => {
+            let mounted = true;
+            async function loadHomeData() {
+                try {
+                    const profileId = await getActiveProfileId();
+                    const [cache, favs, resumes] = await Promise.all([
+                        getCatalogCache(['vodStreams', 'seriesList', 'liveStreams']),
+                        getFavoriteItems(),
+                        getResumeItems(),
+                    ]);
+                    if (!mounted) return;
+                    setVodStreams(cache.data.vodStreams ?? []);
+                    setSeriesList(cache.data.seriesList ?? []);
+                    setLiveStreams(cache.data.liveStreams ?? []);
+                    setFavorites(favs);
+                    setResumeItems(resumes);
+                    if (profileId) {
+                        const cachedEpg = await getEpgCache(profileId);
+                        if (!mounted) return;
+                        if (cachedEpg) {
+                            setTvXmltvListings(cachedEpg.listingsByChannel ?? {});
+                            setTvXmltvChannelIdByName(cachedEpg.channelIdByName ?? {});
+                        }
+                    }
+                    setError('');
+                } catch (err) {
+                    if (!mounted) return;
+                    setError(err instanceof Error ? err.message : 'Chargement impossible.');
+                } finally {
+                    if (mounted) setLoading(false);
+                }
+            }
+
+            void loadHomeData();
+            return () => {
+                mounted = false;
+            };
+        }, [])
+    );
+
+    const vodById = useMemo(() => {
+        return new Map(vodStreams.map((item) => [item.stream_id, item]));
+    }, [vodStreams]);
+
+    const seriesById = useMemo(() => {
+        return new Map(seriesList.map((item) => [item.series_id, item]));
+    }, [seriesList]);
+
+    const liveById = useMemo(() => {
+        return new Map(liveStreams.map((item) => [item.stream_id, item]));
+    }, [liveStreams]);
+
+    const continueItems = useMemo(() => {
+        return resumeItems
+            .filter((item) => item.type !== 'tv' && !item.completed)
+            .sort((a, b) => b.updatedAt - a.updatedAt)
+            .map((item) => {
+                if (item.type === 'movie') {
+                    const movie = vodById.get(item.id);
+                    const title = item.title ?? movie?.name;
+                    if (!title) return null;
+                    const image = item.image ?? movie?.cover ?? movie?.stream_icon;
+                    const progress = item.durationSec ? item.positionSec / item.durationSec : undefined;
+                    return {
+                        key: `resume-movie-${item.id}`,
+                        type: 'movie' as const,
+                        id: item.id,
+                        title,
+                        image,
+                        progress,
+                        extension: movie?.container_extension ?? 'mp4',
+                        resume: item,
+                    };
+                }
+                if (item.type === 'series' && item.seriesId) {
+                    const series = seriesById.get(item.seriesId);
+                    const title = item.title ?? series?.name;
+                    if (!title) return null;
+                    const image = item.image ?? series?.cover ?? series?.backdrop_path?.[0];
+                    const progress = item.durationSec ? item.positionSec / item.durationSec : undefined;
+                    return {
+                        key: `resume-series-${item.seriesId}`,
+                        type: 'series' as const,
+                        id: item.seriesId,
+                        title,
+                        image,
+                        progress,
+                        resume: item,
+                    };
+                }
+                return null;
+            })
+            .filter((item): item is NonNullable<typeof item> => !!item);
+    }, [resumeItems, seriesById, vodById]);
+
+    const favoriteMedia = useMemo(() => {
+        return favorites
+            .filter((item) => item.type !== 'tv')
+            .sort((a, b) => b.addedAt - a.addedAt)
+            .map((item) => {
+                if (item.type === 'movie') {
+                    const movie = vodById.get(item.id);
+                    if (!movie) return null;
+                    return {
+                        key: `fav-movie-${movie.stream_id}`,
+                        type: 'movie' as const,
+                        id: movie.stream_id,
+                        title: movie.name,
+                        image: movie.cover ?? movie.stream_icon,
+                    };
+                }
+                const series = seriesById.get(item.id);
+                if (!series) return null;
+                return {
+                    key: `fav-series-${series.series_id}`,
+                    type: 'series' as const,
+                    id: series.series_id,
+                    title: series.name,
+                    image: series.cover ?? series.backdrop_path?.[0],
+                };
+            })
+            .filter((item): item is NonNullable<typeof item> => !!item);
+    }, [favorites, seriesById, vodById]);
+
+    const favoriteChannels = useMemo(() => {
+        return favorites
+            .filter((item) => item.type === 'tv')
+            .sort((a, b) => b.addedAt - a.addedAt)
+            .map((item) => liveById.get(item.id))
+            .filter((item): item is XtreamStream => !!item);
+    }, [favorites, liveById]);
+
+    const recentMovies = useMemo(() => {
+        return vodStreams.slice(-14).reverse();
+    }, [vodStreams]);
+
+    const recentSeries = useMemo(() => {
+        return seriesList.slice(-14).reverse();
+    }, [seriesList]);
+
+    const liveHighlights = useMemo(() => {
+        return liveStreams.slice(0, 12);
+    }, [liveStreams]);
+
+    const ensureLogoTone = useCallback(
+        (logoUri: string) =>
+            ensureLogoToneCached(logoUri, {
+                cache: logoToneByUri,
+                pending: pendingLogoTones.current,
+                setCache: setLogoToneByUri,
+            }),
+        [logoToneByUri]
+    );
+
+    const renderTvRow = (item: XtreamStream, showDivider: boolean) => {
+        const {image, title, subtitle, metaLabel, progress} = getTvNowInfo({
+            stream: item,
+            channelIdByName: tvXmltvChannelIdByName,
+            listingsByChannel: tvXmltvListings,
+            isLoading: isPrefetching && !Object.keys(tvXmltvListings).length,
+        });
+        if (image) {
+            void ensureLogoTone(image);
+        }
+        return (
+            <Pressable
+                key={`home-tv-${item.stream_id}`}
+                onPress={() =>
+                    router.push({
+                        pathname: '/player/[id]' as const,
+                        params: {
+                            id: String(item.stream_id),
+                            name: item.name,
+                            icon: item.stream_icon ?? undefined,
+                            categoryId: item.category_id ?? undefined,
+                            type: 'tv',
+                        },
+                    })
+                }
+                className="px-6 py-4"
+            >
+                <TvRowContent
+                    image={image}
+                    tone={image ? logoToneByUri[image] : undefined}
+                    name={item.name}
+                    title={title}
+                    subtitle={subtitle}
+                    metaLabel={metaLabel}
+                    progress={progress}
+                />
+                {showDivider ? <View className="mt-3 h-px w-full bg-white/10" /> : null}
+            </Pressable>
+        );
+    };
+
+    const featured = useMemo(() => {
+        const resume = continueItems[0];
+        if (resume?.type === 'movie') {
+            return {
+                ...resume,
+                badge: 'Reprendre',
+                subtitle: 'Continuer la lecture',
+            };
+        }
+        if (resume?.type === 'series') {
+            return {
+                ...resume,
+                badge: 'Série',
+                subtitle: resume.resume?.episodeTitle
+                    ? `Episode: ${resume.resume.episodeTitle}`
+                    : 'Continuer la serie',
+            };
+        }
+        const latestMovie = getLatestVod(vodStreams);
+        const latestSeries = getLatestSeries(seriesList);
+        return latestMovie ?? latestSeries;
+    }, [continueItems, seriesList, vodStreams]);
+
+    const handleToggleFavorite = async (type: FavoriteItem['type'], id: number) => {
+        const next = await toggleFavoriteItem(type, id);
+        setFavorites(next);
+    };
+
+    const handleMoviePlay = (movie: XtreamVod, resume?: ResumeItem) => {
+        const start =
+            resume && resume.positionSec > 30 ? Math.floor(resume.positionSec) : undefined;
+        router.push({
+            pathname: '/player/[id]' as const,
+            params: {
+                id: String(movie.stream_id),
+                name: movie.name,
+                type: 'vod',
+                ext: movie.container_extension ?? 'mp4',
+                ...(start ? {start: String(start)} : {}),
+            },
+        });
+    };
+
+    const handleSeriesOpen = (seriesId: number, title?: string) => {
+        router.push({
+            pathname: '/series/[id]' as const,
+            params: {id: String(seriesId), name: title ?? ''},
+        });
+    };
+
+    const handleMovieOpen = (movieId: number, title?: string) => {
+        router.push({
+            pathname: '/movie/[id]' as const,
+            params: {id: String(movieId), name: title ?? ''},
+        });
+    };
+
+    const isEmpty =
+        !vodStreams.length && !seriesList.length && !liveStreams.length && !loading;
+
     return (
         <View className="flex-1 bg-black">
-            <View className="px-6 pt-12">
-                <View className="flex-row gap-3">
-                    <Pressable
-                        onPress={() => router.push('/series')}
-                        className="rounded-full border border-white/10 bg-white/5 px-4 py-2"
-                    >
-                        <Text className="font-body text-sm text-white">Séries</Text>
-                    </Pressable>
-                    <Pressable
-                        onPress={() => router.push('/movies')}
-                        className="rounded-full border border-white/10 bg-white/5 px-4 py-2"
-                    >
-                        <Text className="font-body text-sm text-white">Films</Text>
-                    </Pressable>
-                    <Pressable
-                        onPress={() => router.push('/tv')}
-                        className="rounded-full border border-white/10 bg-white/5 px-4 py-2"
-                    >
-                        <Text className="font-body text-sm text-white">TV</Text>
-                    </Pressable>
+            <ScrollView className="flex-1" contentContainerStyle={{paddingBottom: 40}}>
+                <View className="px-6 pt-12">
+                    <View className="mt-5 flex-row gap-3">
+                        <Pressable
+                            onPress={() => router.push('/series')}
+                            className="rounded-full border border-white/10 bg-white/5 px-4 py-2"
+                        >
+                            <Text className="font-body text-sm text-white">Séries</Text>
+                        </Pressable>
+                        <Pressable
+                            onPress={() => router.push('/movies')}
+                            className="rounded-full border border-white/10 bg-white/5 px-4 py-2"
+                        >
+                            <Text className="font-body text-sm text-white">Films</Text>
+                        </Pressable>
+                        <Pressable
+                            onPress={() => router.push('/tv')}
+                            className="rounded-full border border-white/10 bg-white/5 px-4 py-2"
+                        >
+                            <Text className="font-body text-sm text-white">TV</Text>
+                        </Pressable>
+                    </View>
                 </View>
-            </View>
+
+                {featured ? (
+                    <View className="px-6 pt-6">
+                        <FeaturedCard
+                            title={featured.title}
+                            image={featured.image}
+                            badge={featured.badge}
+                            subtitle={'subtitle' in featured ? featured.subtitle : undefined}
+                            progress={'progress' in featured ? featured.progress : undefined}
+                            onPress={() => {
+                                if (featured.type === 'movie') {
+                                    handleMovieOpen(featured.id, featured.title);
+                                } else if (featured.type === 'series') {
+                                    handleSeriesOpen(featured.id, featured.title);
+                                }
+                            }}
+                            onPlay={() => {
+                                if (featured.type === 'movie') {
+                                    const movie = vodById.get(featured.id);
+                                    if (movie) {
+                                        handleMoviePlay(
+                                            movie,
+                                            'resume' in featured ? featured.resume : undefined
+                                        );
+                                    } else {
+                                        handleMovieOpen(featured.id, featured.title);
+                                    }
+                                } else if (featured.type === 'series') {
+                                    handleSeriesOpen(featured.id, featured.title);
+                                }
+                            }}
+                            playLabel={featured.type === 'series' ? 'Ouvrir' : 'Lecture'}
+                            isFavorite={favorites.some(
+                                (item) => item.type === featured.type && item.id === featured.id
+                            )}
+                            onToggleFavorite={() =>
+                                handleToggleFavorite(
+                                    featured.type === 'movie' ? 'movie' : 'series',
+                                    featured.id
+                                )
+                            }
+                        />
+                    </View>
+                ) : null}
+
+                {continueItems.length ? (
+                    <View className="pt-2">
+                        <SectionHeader title="Reprendre la lecture" />
+                        <FlatList
+                            horizontal
+                            showsHorizontalScrollIndicator={false}
+                            data={continueItems}
+                            keyExtractor={(item) => item.key}
+                            renderItem={({item}) => (
+                                <MediaCard
+                                    title={item.title}
+                                    image={item.image}
+                                    progress={item.progress}
+                                    onPress={() => {
+                                        if (item.type === 'movie') {
+                                            const movie = vodById.get(item.id);
+                                            if (movie) {
+                                                handleMoviePlay(movie, item.resume);
+                                            } else {
+                                                handleMovieOpen(item.id, item.title);
+                                            }
+                                        } else {
+                                            handleSeriesOpen(item.id, item.title);
+                                        }
+                                    }}
+                                />
+                            )}
+                            contentContainerStyle={{paddingLeft: 24, paddingRight: 24, gap: 16}}
+                            initialNumToRender={8}
+                            maxToRenderPerBatch={8}
+                            windowSize={5}
+                            removeClippedSubviews
+                        />
+                    </View>
+                ) : null}
+
+                {favoriteMedia.length ? (
+                    <View className="pt-6">
+                        <SectionHeader title="Ma liste" />
+                        <FlatList
+                            horizontal
+                            showsHorizontalScrollIndicator={false}
+                            data={favoriteMedia.slice(0, 14)}
+                            keyExtractor={(item) => item.key}
+                            renderItem={({item}) => (
+                                <MediaCard
+                                    title={item.title}
+                                    image={item.image}
+                                    onPress={() => {
+                                        if (item.type === 'movie') {
+                                            handleMovieOpen(item.id, item.title);
+                                        } else {
+                                            handleSeriesOpen(item.id, item.title);
+                                        }
+                                    }}
+                                />
+                            )}
+                            contentContainerStyle={{paddingLeft: 24, paddingRight: 24, gap: 16}}
+                            initialNumToRender={8}
+                            maxToRenderPerBatch={8}
+                            windowSize={5}
+                            removeClippedSubviews
+                        />
+                    </View>
+                ) : null}
+
+                {recentMovies.length ? (
+                    <View className="pt-6">
+                        <SectionHeader
+                            title="Films récents"
+                            href={{type: 'movies', id: 'all', name: 'Films'}}
+                        />
+                        <FlatList
+                            horizontal
+                            showsHorizontalScrollIndicator={false}
+                            data={recentMovies}
+                            keyExtractor={(item) => `movie-${item.stream_id}`}
+                            renderItem={({item}) => (
+                                <MediaCard
+                                    title={item.name}
+                                    image={item.cover ?? item.stream_icon}
+                                    onPress={() => handleMovieOpen(item.stream_id, item.name)}
+                                />
+                            )}
+                            contentContainerStyle={{paddingLeft: 24, paddingRight: 24, gap: 16}}
+                            initialNumToRender={8}
+                            maxToRenderPerBatch={8}
+                            windowSize={5}
+                            removeClippedSubviews
+                        />
+                    </View>
+                ) : null}
+
+                {recentSeries.length ? (
+                    <View className="pt-6">
+                        <SectionHeader
+                            title="Séries récentes"
+                            href={{type: 'series', id: 'all', name: 'Séries'}}
+                        />
+                        <FlatList
+                            horizontal
+                            showsHorizontalScrollIndicator={false}
+                            data={recentSeries}
+                            keyExtractor={(item) => `series-${item.series_id}`}
+                            renderItem={({item}) => (
+                                <MediaCard
+                                    title={item.name}
+                                    image={item.cover ?? item.backdrop_path?.[0]}
+                                    onPress={() => handleSeriesOpen(item.series_id, item.name)}
+                                />
+                            )}
+                            contentContainerStyle={{paddingLeft: 24, paddingRight: 24, gap: 16}}
+                            initialNumToRender={8}
+                            maxToRenderPerBatch={8}
+                            windowSize={5}
+                            removeClippedSubviews
+                        />
+                    </View>
+                ) : null}
+
+                {favoriteChannels.length ? (
+                    <View className="pt-6">
+                        <SectionHeader
+                            title="Chaînes favorites"
+                            href={{type: 'tv', id: 'all', name: 'TV'}}
+                        />
+                        <View className="mt-2">
+                            {favoriteChannels.slice(0, 6).map((item, index, list) =>
+                                renderTvRow(item, index < list.length - 1)
+                            )}
+                        </View>
+                    </View>
+                ) : null}
+
+                {liveHighlights.length ? (
+                    <View className="pt-6">
+                        <SectionHeader title="En direct" href={{type: 'tv', id: 'all', name: 'TV'}} />
+                        <View className="mt-2">
+                            {liveHighlights.slice(0, 6).map((item, index, list) =>
+                                renderTvRow(item, index < list.length - 1)
+                            )}
+                        </View>
+                    </View>
+                ) : null}
+
+                {loading && !isPrefetching && !vodStreams.length && !seriesList.length ? (
+                    <View className="pt-10 items-center">
+                        <ActivityIndicator size="large" color="#ffffff" />
+                        <Text className="mt-4 font-body text-sm text-white/80">
+                            Chargement du contenu...
+                        </Text>
+                    </View>
+                ) : null}
+
+                {error && !loading ? (
+                    <View className="px-6 pt-6">
+                        <Text className="font-body text-ember">{error}</Text>
+                    </View>
+                ) : null}
+
+                {isEmpty ? (
+                    <View className="px-6 pt-10">
+                        <Text className="font-body text-mist">
+                            Aucun contenu en cache pour le moment.
+                        </Text>
+                    </View>
+                ) : null}
+            </ScrollView>
+
             {isPrefetching ? (
-                <View className="absolute inset-0 items-center justify-center bg-black/70">
+                <View className="absolute inset-0 items-center justify-center bg-black/90 h-screen w-screen z-50">
                     <ActivityIndicator size="large" color="#ffffff" />
-                    <Text className="mt-4 font-body text-sm text-white/80">
-                        Preparation du catalogue...
+                    <Text className="mt-4 font-semibold text-base text-white/80">
+                        {prefetchMessage}
                     </Text>
                 </View>
             ) : null}

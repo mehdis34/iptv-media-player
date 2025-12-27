@@ -1,26 +1,20 @@
 import {useRouter} from 'expo-router';
 import {useFocusEffect} from '@react-navigation/native';
 import {type ReactNode, useCallback, useEffect, useMemo, useRef, useState} from 'react';
-import {ActivityIndicator, FlatList, Modal, Pressable, Text, useWindowDimensions, View} from 'react-native';
+import {ActivityIndicator, FlatList, Modal, Pressable, StyleSheet, Text, useWindowDimensions, View} from 'react-native';
+import Ionicons from '@expo/vector-icons/Ionicons';
 import {LinearGradient} from 'expo-linear-gradient';
 import {BlurView} from 'expo-blur';
 
 import FeaturedCard from '@/components/FeaturedCard';
 import MediaCard from '@/components/MediaCard';
-import ScreenHeader from '@/components/ScreenHeader';
 import SectionHeader from '@/components/SectionHeader';
+import {useFavoritesAndResumesState} from '@/lib/catalog.hooks';
 import {getDominantColor, getLatestVod} from '@/lib/media';
-import {
-    getActiveProfileId,
-    getCatalogCache,
-    getCredentials,
-    getFavoriteItems,
-    getResumeItems,
-    setCatalogCache,
-    toggleFavoriteItem,
-} from '@/lib/storage';
+import {CATALOG_CACHE_TTL_MS, applyFavoritesAndResumes, shouldReloadForProfile} from '@/lib/catalog.utils';
+import {getCatalogCache, getCredentials, setCatalogCache, toggleFavoriteItem} from '@/lib/storage';
 import {fetchVodCategories, fetchVodStreams} from '@/lib/xtream';
-import type {FavoriteItem, ResumeItem, XtreamCategory, XtreamVod} from '@/lib/types';
+import type {ResumeItem, XtreamCategory, XtreamVod} from '@/lib/types';
 
 type CategoryParams = {
     type: 'movies';
@@ -38,16 +32,16 @@ type MovieRow = {
 export default function MoviesScreen() {
     const {height} = useWindowDimensions();
     const router = useRouter();
+    const headerHeight = 96;
     const [vodCategories, setVodCategories] = useState<XtreamCategory[]>([]);
     const [vodStreams, setVodStreams] = useState<XtreamVod[]>([]);
-    const [favorites, setFavorites] = useState<FavoriteItem[]>([]);
-    const [resumeItems, setResumeItems] = useState<ResumeItem[]>([]);
-    const catalogCacheTtl = 6 * 60 * 60 * 1000;
+    const {favorites, setFavorites, resumeItems, setResumeItems} = useFavoritesAndResumesState();
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState('');
     const [heroTone, setHeroTone] = useState('#000000');
     const [showInitialLoader, setShowInitialLoader] = useState(false);
     const [initialLoadingMessage, setInitialLoadingMessage] = useState('Chargement en cours...');
+    const [isHeaderBlurred, setIsHeaderBlurred] = useState(false);
     const lastProfileKey = useRef<string | null>(null);
     const hasLoadedOnce = useRef(false);
 
@@ -78,13 +72,14 @@ export default function MoviesScreen() {
 
         async function load() {
             try {
-                const activeId = await getActiveProfileId();
-                const profileKey = activeId ?? 'default';
-                const profileChanged = lastProfileKey.current !== profileKey;
-                if (hasLoadedOnce.current && !profileChanged) {
+                if (
+                    !(await shouldReloadForProfile({
+                        lastProfileKey,
+                        hasLoadedOnce,
+                    }))
+                ) {
                     return;
                 }
-                lastProfileKey.current = profileKey;
                 setLoading(true);
                 setShowInitialLoader(false);
                 setError('');
@@ -93,21 +88,23 @@ export default function MoviesScreen() {
                     router.replace('/login');
                     return;
                 }
-                const cache = await getCatalogCache();
+                const cache = await getCatalogCache(['vodCategories', 'vodStreams']);
                 const now = Date.now();
                 const cacheFresh =
                     cache.updatedAt.vodCategories &&
                     cache.updatedAt.vodStreams &&
-                    now - cache.updatedAt.vodCategories < catalogCacheTtl &&
-                    now - cache.updatedAt.vodStreams < catalogCacheTtl;
+                    now - cache.updatedAt.vodCategories < CATALOG_CACHE_TTL_MS &&
+                    now - cache.updatedAt.vodStreams < CATALOG_CACHE_TTL_MS;
 
                 if (cache.data.vodCategories) setVodCategories(cache.data.vodCategories);
                 if (cache.data.vodStreams) setVodStreams(cache.data.vodStreams);
 
-                const [favs, resumes] = await Promise.all([getFavoriteItems(), getResumeItems()]);
-                if (!mounted) return;
-                setFavorites(favs);
-                setResumeItems(resumes);
+                const applied = await applyFavoritesAndResumes({
+                    setFavorites,
+                    setResumes: setResumeItems,
+                    isMounted: () => mounted,
+                });
+                if (!applied) return;
 
                 if (cacheFresh) {
                     hasLoadedOnce.current = true;
@@ -148,6 +145,12 @@ export default function MoviesScreen() {
     }, [router]);
 
     useFocusEffect(loadData);
+
+    const handleScroll = (event: any) => {
+        const offsetY = event.nativeEvent.contentOffset.y;
+        const next = offsetY > 12;
+        setIsHeaderBlurred((prev) => (prev !== next ? next : prev));
+    };
 
     const makeCategoryHref = (id: string, name?: string): CategoryParams => ({
         type: 'movies',
@@ -293,7 +296,34 @@ export default function MoviesScreen() {
                 style={{position: 'absolute', top: 0, left: 0, right: 0, height}}
                 pointerEvents="none"
             />
-            <ScreenHeader title="Films" onBack={() => router.back()} />
+            <View
+                className="absolute left-0 right-0 top-0 z-10 flex-row items-center justify-between px-6 bg-transparent"
+                style={{height: headerHeight, paddingTop: 36}}
+            >
+                <BlurView
+                    tint="dark"
+                    intensity={isHeaderBlurred ? 30 : 0}
+                    style={StyleSheet.absoluteFillObject}
+                    pointerEvents="none"
+                />
+                <View
+                    style={[
+                        StyleSheet.absoluteFillObject,
+                        {backgroundColor: isHeaderBlurred ? 'rgba(0,0,0,0.35)' : 'transparent'},
+                    ]}
+                    pointerEvents="none"
+                />
+                <Pressable
+                    onPress={() => router.back()}
+                    className="h-10 w-10 items-center justify-center"
+                >
+                    <Ionicons name="chevron-back" size={24} color="#ffffff" />
+                </Pressable>
+                <Text className="max-w-[60%] font-bodySemi text-base text-white" numberOfLines={1}>
+                    Films
+                </Text>
+                <View className="w-10" />
+            </View>
             <FlatList<MovieRow>
                 className="flex-1"
                 data={movieRows}
@@ -302,7 +332,9 @@ export default function MoviesScreen() {
                 ListHeaderComponent={renderHeader}
                 ListFooterComponent={<View className="h-10"/>}
                 ItemSeparatorComponent={() => <View className="h-4"/>}
-                contentContainerStyle={{paddingBottom: 40}}
+                contentContainerStyle={{paddingTop: headerHeight + 16, paddingBottom: 40}}
+                onScroll={handleScroll}
+                scrollEventThrottle={16}
                 initialNumToRender={6}
                 maxToRenderPerBatch={6}
                 windowSize={7}

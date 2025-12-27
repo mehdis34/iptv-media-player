@@ -10,8 +10,17 @@ import ResumeStatusPill from '@/components/ResumeStatusPill';
 import SynopsisBlock from '@/components/SynopsisBlock';
 import TrailerCard from '@/components/TrailerCard';
 import UnderlineTabs from '@/components/UnderlineTabs';
+import {CATALOG_CACHE_TTL_MS} from '@/lib/catalog.utils';
 import {getDominantColor, safeImageUri} from '@/lib/media';
-import {getCredentials, getFavoriteItems, getResumeItem, getResumeItems, toggleFavoriteItem} from '@/lib/storage';
+import {
+    getCatalogCache,
+    getCredentials,
+    getFavoriteItems,
+    getResumeItem,
+    getResumeItems,
+    setCatalogCache,
+    toggleFavoriteItem,
+} from '@/lib/storage';
 import {buildTrailerMeta} from '@/lib/trailer.utils';
 import {fetchVodInfo, fetchVodStreams} from '@/lib/xtream';
 import type {FavoriteItem, ResumeItem, XtreamVod, XtreamVodInfo} from '@/lib/types';
@@ -51,22 +60,43 @@ export default function MovieDetailScreen() {
                     router.replace('/login');
                     return;
                 }
-                const [info, list, favs, resumes] = await Promise.all([
+                const cache = await getCatalogCache(['vodStreams']);
+                if (!mounted) return;
+                if (cache.data.vodStreams) {
+                    setVodList(cache.data.vodStreams);
+                }
+                const [info, favs, resumes] = await Promise.all([
                     fetchVodInfo(creds, streamId),
-                    fetchVodStreams(creds),
                     getFavoriteItems(),
                     getResumeItems(),
                 ]);
                 if (!mounted) return;
                 setVodInfo(info);
-                setVodList(list);
                 setFavorites(favs);
                 setResumeItems(resumes);
+                setLoading(false);
+
+                const now = Date.now();
+                const cacheFresh =
+                    cache.updatedAt.vodStreams &&
+                    now - cache.updatedAt.vodStreams < CATALOG_CACHE_TTL_MS;
+                if (!cacheFresh) {
+                    try {
+                        const list = await fetchVodStreams(creds);
+                        if (!mounted) return;
+                        setVodList(list);
+                        await setCatalogCache({vodStreams: list});
+                    } catch {
+                        if (!mounted) return;
+                        if (!cache.data.vodStreams?.length) {
+                            setError('Chargement impossible.');
+                        }
+                    }
+                }
             } catch (err) {
                 if (!mounted) return;
                 setError(err instanceof Error ? err.message : 'Chargement impossible.');
-            } finally {
-                if (mounted) setLoading(false);
+                setLoading(false);
             }
         }
 

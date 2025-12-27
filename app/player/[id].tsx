@@ -14,6 +14,7 @@ import type {FavoriteItem, ResumeItem, XtreamCategory, XtreamEpisode, XtreamEpgL
 import {safeImageUri} from '@/lib/media';
 import {decodeEpgText, normalizeXmltvName, parseXmltvDate, resolveXmltvChannelId as resolveXmltvChannelIdFromStream} from '@/lib/epg.utils';
 import {formatDayLabel} from '@/lib/date.utils';
+import TvRowContent from '@/components/TvRowContent';
 
 export default function PlayerScreen() {
     const router = useRouter();
@@ -640,7 +641,7 @@ export default function PlayerScreen() {
                     ? params.categoryId
                     : null;
             if (!categoryId && params.id) {
-                const cache = await getCatalogCache();
+                const cache = await getCatalogCache(['liveStreams']);
                 const streamId = Number(params.id);
                 const stream = cache.data.liveStreams?.find(
                     (item) => item.stream_id === streamId
@@ -1441,51 +1442,17 @@ export default function PlayerScreen() {
                                                             onPress={() => handleZapStreamPress(item)}
                                                             className="border-b border-white/10 py-3"
                                                         >
-                                                            <View className="flex-row items-center gap-3">
-                                                                <View className="relative h-12 w-20 items-center justify-center overflow-hidden rounded-md bg-white/5">
-                                                                    {icon ? (
-                                                                        <Image
-                                                                            source={{uri: icon}}
-                                                                            className="h-full w-full"
-                                                                            resizeMode="contain"
-                                                                        />
-                                                                    ) : (
-                                                                        <Text className="font-body text-[10px] text-white/70">
-                                                                            TV
-                                                                        </Text>
-                                                                    )}
-                                                                    {progress !== null ? (
-                                                                        <View className="absolute bottom-1 left-1 right-1 h-1 overflow-hidden rounded-full bg-white/25">
-                                                                            <View
-                                                                                className="h-full rounded-full bg-ember"
-                                                                                style={{
-                                                                                    width: `${Math.round(
-                                                                                        progress * 100
-                                                                                    )}%`,
-                                                                                }}
-                                                                            />
-                                                                        </View>
-                                                                    ) : null}
-                                                                </View>
-                                                                <View className="flex-1">
-                                                                    <Text
-                                                                        className="font-bodySemi text-xs text-white/70"
-                                                                        numberOfLines={1}
-                                                                    >
-                                                                        {item.name}
-                                                                    </Text>
-                                                                    <Text
-                                                                        className="mt-1 font-bodySemi text-sm text-white"
-                                                                        numberOfLines={2}
-                                                                    >
-                                                                        {title}
-                                                                    </Text>
-                                                                    <Text className="mt-1 font-body text-xs text-white/60">
-                                                                        {subtitle ? subtitle : ''}
-                                                                        {metaLabel ? ` • ${metaLabel}` : ''}
-                                                                    </Text>
-                                                                </View>
-                                                            </View>
+                                                            <TvRowContent
+                                                                image={icon}
+                                                                name={item.name}
+                                                                title={title}
+                                                                subtitle={subtitle}
+                                                                metaLabel={metaLabel}
+                                                                progress={progress}
+                                                                logoClassName="relative h-12 w-20 items-center justify-center overflow-hidden rounded-md"
+                                                                fallbackColor="rgba(255,255,255,0.05)"
+                                                                logoTextClassName="font-body text-[10px] text-white/70"
+                                                            />
                                                         </Pressable>
                                                     );
                                                 }}

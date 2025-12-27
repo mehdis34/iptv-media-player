@@ -1,14 +1,18 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
+import {
+  type CatalogCache,
+  type CatalogCacheKey,
+  clearCatalogCacheEntries,
+  getCatalogCacheEntries,
+  setCatalogCacheEntries,
+} from './catalog-cache';
+
 import type {
   FavoriteItem,
   ResumeItem,
-  XtreamCategory,
   XtreamCredentials,
   XtreamProfile,
-  XtreamSeries,
-  XtreamStream,
-  XtreamVod,
 } from './types';
 
 const STORAGE_KEYS = {
@@ -72,7 +76,9 @@ export async function clearCredentials() {
     STORAGE_KEYS.creds,
     STORAGE_KEYS.profiles,
     STORAGE_KEYS.activeProfileId,
+    STORAGE_KEYS.catalogCacheV1,
   ]);
+  await clearCatalogCacheEntries();
 }
 
 export async function getFavorites(): Promise<number[]> {
@@ -87,31 +93,6 @@ export async function getSeriesFavorites(): Promise<number[]> {
 
 type FavoritesByProfile = Record<string, FavoriteItem[]>;
 type ResumeByProfile = Record<string, ResumeItem[]>;
-type CatalogCacheKey =
-  | 'liveCategories'
-  | 'liveStreams'
-  | 'vodCategories'
-  | 'vodStreams'
-  | 'seriesCategories'
-  | 'seriesList';
-type CatalogCache = {
-  liveCategories: XtreamCategory[];
-  liveStreams: XtreamStream[];
-  vodCategories: XtreamCategory[];
-  vodStreams: XtreamVod[];
-  seriesCategories: XtreamCategory[];
-  seriesList: XtreamSeries[];
-};
-type CatalogCacheEntry = { updatedAt: number; data: CatalogCache[CatalogCacheKey] };
-type CatalogCacheMap = Record<string, Partial<Record<CatalogCacheKey, CatalogCacheEntry>>>;
-
-function setCatalogCacheData<K extends CatalogCacheKey>(
-  target: Partial<CatalogCache>,
-  key: K,
-  value: CatalogCache[K]
-) {
-  target[key] = value;
-}
 
 export async function getFavoriteItems(): Promise<FavoriteItem[]> {
   const profileId = await getActiveProfileId();
@@ -302,38 +283,21 @@ async function getFavoritesMap(profileId: string): Promise<FavoritesByProfile> {
   return parsed && typeof parsed === 'object' ? parsed : {};
 }
 
-export async function getCatalogCache(): Promise<{
+export async function getCatalogCache(
+  keys?: ReadonlyArray<CatalogCacheKey>
+): Promise<{
   data: Partial<CatalogCache>;
   updatedAt: Partial<Record<CatalogCacheKey, number>>;
 }> {
   const profileId = await getActiveProfileId();
   if (!profileId) return { data: {}, updatedAt: {} };
-  const map = await getCatalogCacheMap(profileId);
-  const entries = map[profileId] ?? {};
-  const data: Partial<CatalogCache> = {};
-  const updatedAt: Partial<Record<CatalogCacheKey, number>> = {};
-  (Object.keys(entries) as CatalogCacheKey[]).forEach((key) => {
-    const entry = entries[key];
-    if (!entry) return;
-    setCatalogCacheData(data, key, entry.data as CatalogCache[typeof key]);
-    updatedAt[key] = entry.updatedAt;
-  });
-  return { data, updatedAt };
+  return getCatalogCacheEntries(profileId, keys);
 }
 
 export async function setCatalogCache(partial: Partial<CatalogCache>) {
   const profileId = await getActiveProfileId();
   if (!profileId) return;
-  const map = await getCatalogCacheMap(profileId);
-  const entries = map[profileId] ?? {};
-  const now = Date.now();
-  (Object.keys(partial) as CatalogCacheKey[]).forEach((key) => {
-    const value = partial[key];
-    if (!value) return;
-    entries[key] = { updatedAt: now, data: value } as CatalogCacheEntry;
-  });
-  map[profileId] = entries;
-  await setCatalogCacheMap(map);
+  await setCatalogCacheEntries(profileId, partial);
 }
 
 async function setFavoritesMap(map: FavoritesByProfile) {
@@ -351,17 +315,4 @@ async function getResumeMap(profileId: string): Promise<ResumeByProfile> {
 
 async function setResumeMap(map: ResumeByProfile) {
   await AsyncStorage.setItem(STORAGE_KEYS.resumeV1, JSON.stringify(map));
-}
-
-async function getCatalogCacheMap(profileId: string): Promise<CatalogCacheMap> {
-  const raw = await AsyncStorage.getItem(STORAGE_KEYS.catalogCacheV1);
-  const parsed = raw ? (JSON.parse(raw) as CatalogCacheMap) : {};
-  if (!parsed[profileId]) {
-    parsed[profileId] = {};
-  }
-  return parsed;
-}
-
-async function setCatalogCacheMap(map: CatalogCacheMap) {
-  await AsyncStorage.setItem(STORAGE_KEYS.catalogCacheV1, JSON.stringify(map));
 }

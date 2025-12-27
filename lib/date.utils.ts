@@ -13,3 +13,10 @@ export const formatDayLabel = (date: Date, today: Date) => {
         month: 'long',
     });
 };
+
+export const formatClock = (date: Date | null) => {
+    if (!date) return '--:--';
+    const hours = String(date.getHours()).padStart(2, '0');
+    const minutes = String(date.getMinutes()).padStart(2, '0');
+    return `${hours}h${minutes}`;
+};

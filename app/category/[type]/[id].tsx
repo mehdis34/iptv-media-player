@@ -17,17 +17,17 @@ import FeaturedCard from '@/components/FeaturedCard';
 import MediaCard from '@/components/MediaCard';
 import MediaGrid from '@/components/MediaGrid';
 import SectionHeader from '@/components/SectionHeader';
+import {useFavoritesAndResumesState} from '@/lib/catalog.hooks';
+import { CATALOG_CACHE_TTL_MS, applyFavoritesAndResumes } from '@/lib/catalog.utils';
 import { getDominantColor } from '@/lib/media';
 import {
   getCatalogCache,
   getCredentials,
-  getFavoriteItems,
-  getResumeItems,
   setCatalogCache,
   toggleFavoriteItem,
 } from '@/lib/storage';
 import { fetchLiveStreams, fetchSeries, fetchVodStreams } from '@/lib/xtream';
-import type { FavoriteItem, ResumeItem, XtreamSeries, XtreamStream, XtreamVod } from '@/lib/types';
+import type { XtreamSeries, XtreamStream, XtreamVod } from '@/lib/types';
 import { handlePlaySeries as handlePlaySeriesFromUtils } from '@/lib/series.utils';
 
 type RouteParams = {
@@ -43,12 +43,10 @@ export default function CategoryScreen() {
   const { type, id, name } = useLocalSearchParams<RouteParams>();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const [favorites, setFavorites] = useState<FavoriteItem[]>([]);
-  const [resumeItems, setResumeItems] = useState<ResumeItem[]>([]);
+  const {favorites, setFavorites, resumeItems, setResumeItems} = useFavoritesAndResumesState();
   const [tvItems, setTvItems] = useState<XtreamStream[]>([]);
   const [movieItems, setMovieItems] = useState<XtreamVod[]>([]);
   const [seriesItems, setSeriesItems] = useState<XtreamSeries[]>([]);
-  const catalogCacheTtl = 6 * 60 * 60 * 1000;
 
   const handlePlaySeries = useCallback(
     async (seriesId: number, seriesName: string) => {
@@ -67,15 +65,23 @@ export default function CategoryScreen() {
         if (!creds || !type || !id) {
           return;
         }
-        const cache = await getCatalogCache();
+        const cacheKeys =
+          type === 'tv'
+            ? (['liveStreams'] as const)
+            : type === 'movies'
+              ? (['vodStreams'] as const)
+              : (['seriesList'] as const);
+        const cache = await getCatalogCache(cacheKeys);
         const now = Date.now();
         const cacheFresh =
-          cache.updatedAt.liveStreams &&
-          cache.updatedAt.vodStreams &&
-          cache.updatedAt.seriesList &&
-          now - cache.updatedAt.liveStreams < catalogCacheTtl &&
-          now - cache.updatedAt.vodStreams < catalogCacheTtl &&
-          now - cache.updatedAt.seriesList < catalogCacheTtl;
+          type === 'tv'
+            ? !!cache.updatedAt.liveStreams &&
+              now - cache.updatedAt.liveStreams < CATALOG_CACHE_TTL_MS
+            : type === 'movies'
+              ? !!cache.updatedAt.vodStreams &&
+                now - cache.updatedAt.vodStreams < CATALOG_CACHE_TTL_MS
+              : !!cache.updatedAt.seriesList &&
+                now - cache.updatedAt.seriesList < CATALOG_CACHE_TTL_MS;
 
         if (cache.data.liveStreams && type === 'tv') {
           const live = cache.data.liveStreams;
@@ -90,31 +96,31 @@ export default function CategoryScreen() {
           setSeriesItems(id === 'all' ? list : list.filter((item) => item.category_id === id));
         }
 
-        const [favs, resumes] = await Promise.all([getFavoriteItems(), getResumeItems()]);
-        if (!mounted) return;
-        setFavorites(favs);
-        setResumeItems(resumes);
+        const applied = await applyFavoritesAndResumes({
+          setFavorites,
+          setResumes: setResumeItems,
+          isMounted: () => mounted,
+        });
+        if (!applied) return;
 
         if (cacheFresh) return;
 
-        const [live, vod, series] = await Promise.all([
-          fetchLiveStreams(creds),
-          fetchVodStreams(creds),
-          fetchSeries(creds),
-        ]);
-        if (!mounted) return;
         if (type === 'tv') {
+          const live = await fetchLiveStreams(creds);
+          if (!mounted) return;
           setTvItems(id === 'all' ? live : live.filter((item) => item.category_id === id));
+          await setCatalogCache({ liveStreams: live });
         } else if (type === 'movies') {
+          const vod = await fetchVodStreams(creds);
+          if (!mounted) return;
           setMovieItems(id === 'all' ? vod : vod.filter((item) => item.category_id === id));
+          await setCatalogCache({ vodStreams: vod });
         } else if (type === 'series') {
+          const series = await fetchSeries(creds);
+          if (!mounted) return;
           setSeriesItems(id === 'all' ? series : series.filter((item) => item.category_id === id));
+          await setCatalogCache({ seriesList: series });
         }
-        await setCatalogCache({
-          liveStreams: live,
-          vodStreams: vod,
-          seriesList: series,
-        });
       } catch (err) {
         if (mounted) {
           setError(err instanceof Error ? err.message : 'Chargement impossible.');
