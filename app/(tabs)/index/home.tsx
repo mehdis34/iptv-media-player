@@ -1,7 +1,9 @@
 import {useRouter} from 'expo-router';
 import {useFocusEffect} from '@react-navigation/native';
 import {useCallback, useMemo, useRef, useState} from 'react';
-import {ActivityIndicator, FlatList, Pressable, ScrollView, Text, View} from 'react-native';
+import {ActivityIndicator, FlatList, Pressable, ScrollView, StyleSheet, Text, View,} from 'react-native';
+import Ionicons from '@expo/vector-icons/Ionicons';
+import {BlurView} from 'expo-blur';
 
 import FeaturedCard from '@/components/FeaturedCard';
 import MediaCard from '@/components/MediaCard';
@@ -30,6 +32,7 @@ import {
     fetchXmltvEpg,
 } from '@/lib/xtream';
 import {getTvNowInfo} from '@/lib/tv.utils';
+import {parseEpgDate, resolveXmltvChannelId} from '@/lib/epg.utils';
 import type {FavoriteItem, ResumeItem, XtreamEpgListing, XtreamSeries, XtreamStream, XtreamVod} from '@/lib/types';
 
 export default function HomeScreen() {
@@ -50,6 +53,9 @@ export default function HomeScreen() {
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState('');
     const [prefetchMessage, setPrefetchMessage] = useState('Chargement du catalogue...');
+    const headerHeight = 168;
+    const headerTopPadding = 64;
+    const [isHeaderBlurred, setIsHeaderBlurred] = useState(false);
 
     const formatPrefetchMessage = (labels: string[]) => {
         if (!labels.length) return 'Chargement du catalogue...';
@@ -193,6 +199,7 @@ export default function HomeScreen() {
     useFocusEffect(
         useCallback(() => {
             let mounted = true;
+
             async function loadHomeData() {
                 try {
                     const profileId = await getActiveProfileId();
@@ -331,9 +338,35 @@ export default function HomeScreen() {
         return seriesList.slice(-14).reverse();
     }, [seriesList]);
 
+    const hasCurrentProgram = useCallback(
+        (stream: XtreamStream) => {
+            const channelId = resolveXmltvChannelId(stream, tvXmltvChannelIdByName);
+            const listings = tvXmltvListings[channelId];
+            if (!listings?.length) return false;
+            const now = Date.now();
+            return listings.some((listing) => {
+                const start = parseEpgDate(listing, 'start');
+                const end = parseEpgDate(listing, 'end');
+                if (!start || !end) return false;
+                const startMs = start.getTime();
+                const endMs = end.getTime();
+                return startMs <= now && endMs >= now;
+            });
+        },
+        [tvXmltvChannelIdByName, tvXmltvListings]
+    );
+
+    const favoriteChannelsWithEpg = useMemo(() => {
+        return favoriteChannels.filter(
+            (stream) => !!stream.stream_icon?.trim() && hasCurrentProgram(stream)
+        );
+    }, [favoriteChannels, hasCurrentProgram]);
+
     const liveHighlights = useMemo(() => {
-        return liveStreams.slice(0, 12);
-    }, [liveStreams]);
+        return liveStreams
+            .filter((stream) => !!stream.stream_icon?.trim() && hasCurrentProgram(stream))
+            .slice(0, 12);
+    }, [liveStreams, hasCurrentProgram]);
 
     const ensureLogoTone = useCallback(
         (logoUri: string) =>
@@ -381,7 +414,7 @@ export default function HomeScreen() {
                     metaLabel={metaLabel}
                     progress={progress}
                 />
-                {showDivider ? <View className="mt-3 h-px w-full bg-white/10" /> : null}
+                {showDivider ? <View className="mt-3 h-px w-full bg-white/10"/> : null}
             </Pressable>
         );
     };
@@ -446,34 +479,70 @@ export default function HomeScreen() {
     const isEmpty =
         !vodStreams.length && !seriesList.length && !liveStreams.length && !loading;
 
+    const handleScroll = useCallback((event: { nativeEvent: { contentOffset: { y: number } } }) => {
+        const y = event.nativeEvent.contentOffset.y;
+        setIsHeaderBlurred(y > 10);
+    }, []);
+
     return (
         <View className="flex-1 bg-black">
-            <ScrollView className="flex-1" contentContainerStyle={{paddingBottom: 40}}>
-                <View className="px-6 pt-12">
-                    <View className="mt-5 flex-row gap-3">
+            <View
+                className="absolute left-0 right-0 top-0 z-10"
+                style={{height: headerHeight, paddingTop: headerTopPadding}}
+            >
+                <BlurView
+                    tint="dark"
+                    intensity={isHeaderBlurred ? 30 : 0}
+                    style={StyleSheet.absoluteFillObject}
+                    pointerEvents="none"
+                />
+                <View
+                    style={[
+                        StyleSheet.absoluteFillObject,
+                        {backgroundColor: isHeaderBlurred ? 'rgba(0,0,0,0.35)' : 'transparent'},
+                    ]}
+                    pointerEvents="none"
+                />
+                <View className="px-6">
+                    <View className="flex-row items-center justify-between">
+                        <Text className="flex-1 font-display text-3xl text-white">Accueil</Text>
+                        <View className="flex-row items-center gap-4">
+                            <Ionicons name="download-outline" size={22} color="#ffffff"/>
+                            <Ionicons name="notifications-outline" size={22} color="#ffffff"/>
+                        </View>
+                    </View>
+                    <View className="mt-3 flex-row gap-1.5">
                         <Pressable
                             onPress={() => router.push('/series')}
-                            className="rounded-full border border-white/10 bg-white/5 px-4 py-2"
+                            className="flex-1 items-center justify-center rounded-l-full rounded-r-lg border border-white/10 bg-white/5 py-3"
                         >
-                            <Text className="font-body text-sm text-white">Séries</Text>
+                            <Text className="font-semibold text-base text-white">Séries</Text>
                         </Pressable>
                         <Pressable
                             onPress={() => router.push('/movies')}
-                            className="rounded-full border border-white/10 bg-white/5 px-4 py-2"
+                            className="flex-1 items-center justify-center rounded-lg border border-white/10 bg-white/5 py-3"
                         >
-                            <Text className="font-body text-sm text-white">Films</Text>
+                            <Text className="font-semibold text-base text-white">Films</Text>
                         </Pressable>
                         <Pressable
                             onPress={() => router.push('/tv')}
-                            className="rounded-full border border-white/10 bg-white/5 px-4 py-2"
+                            className="flex-1 items-center justify-center rounded-r-full border border-white/10 bg-white/5 py-3"
                         >
-                            <Text className="font-body text-sm text-white">TV</Text>
+                            <Text className="font-semibold text-base text-white">Chaînes TV</Text>
                         </Pressable>
                     </View>
                 </View>
-
+            </View>
+            <ScrollView
+                className="flex-1"
+                contentContainerStyle={{paddingBottom: 120}}
+                showsVerticalScrollIndicator={false}
+                onScroll={handleScroll}
+                scrollEventThrottle={16}
+            >
+                <View style={{height: headerHeight}}/>
                 {featured ? (
-                    <View className="px-6 pt-6">
+                    <View className="px-6">
                         <FeaturedCard
                             title={featured.title}
                             image={featured.image}
@@ -518,7 +587,7 @@ export default function HomeScreen() {
 
                 {continueItems.length ? (
                     <View className="pt-2">
-                        <SectionHeader title="Reprendre la lecture" />
+                        <SectionHeader title="Reprendre la lecture"/>
                         <FlatList
                             horizontal
                             showsHorizontalScrollIndicator={false}
@@ -554,7 +623,7 @@ export default function HomeScreen() {
 
                 {favoriteMedia.length ? (
                     <View className="pt-6">
-                        <SectionHeader title="Ma liste" />
+                        <SectionHeader title="Ma liste"/>
                         <FlatList
                             horizontal
                             showsHorizontalScrollIndicator={false}
@@ -586,7 +655,7 @@ export default function HomeScreen() {
                     <View className="pt-6">
                         <SectionHeader
                             title="Films récents"
-                            href={{type: 'movies', id: 'all', name: 'Films'}}
+                            link="/movies"
                         />
                         <FlatList
                             horizontal
@@ -613,7 +682,7 @@ export default function HomeScreen() {
                     <View className="pt-6">
                         <SectionHeader
                             title="Séries récentes"
-                            href={{type: 'series', id: 'all', name: 'Séries'}}
+                            link="/series"
                         />
                         <FlatList
                             horizontal
@@ -636,14 +705,14 @@ export default function HomeScreen() {
                     </View>
                 ) : null}
 
-                {favoriteChannels.length ? (
+                {favoriteChannelsWithEpg.length ? (
                     <View className="pt-6">
                         <SectionHeader
                             title="Chaînes favorites"
-                            href={{type: 'tv', id: 'all', name: 'TV'}}
+                            link="/tv"
                         />
                         <View className="mt-2">
-                            {favoriteChannels.slice(0, 6).map((item, index, list) =>
+                            {favoriteChannelsWithEpg.slice(0, 10).map((item, index, list) =>
                                 renderTvRow(item, index < list.length - 1)
                             )}
                         </View>
@@ -652,9 +721,9 @@ export default function HomeScreen() {
 
                 {liveHighlights.length ? (
                     <View className="pt-6">
-                        <SectionHeader title="En direct" href={{type: 'tv', id: 'all', name: 'TV'}} />
+                        <SectionHeader title="En direct" link="/tv"/>
                         <View className="mt-2">
-                            {liveHighlights.slice(0, 6).map((item, index, list) =>
+                            {liveHighlights.slice(0, 10).map((item, index, list) =>
                                 renderTvRow(item, index < list.length - 1)
                             )}
                         </View>
@@ -663,7 +732,7 @@ export default function HomeScreen() {
 
                 {loading && !isPrefetching && !vodStreams.length && !seriesList.length ? (
                     <View className="pt-10 items-center">
-                        <ActivityIndicator size="large" color="#ffffff" />
+                        <ActivityIndicator size="large" color="#ffffff"/>
                         <Text className="mt-4 font-body text-sm text-white/80">
                             Chargement du contenu...
                         </Text>
@@ -687,7 +756,7 @@ export default function HomeScreen() {
 
             {isPrefetching ? (
                 <View className="absolute inset-0 items-center justify-center bg-black/90 h-screen w-screen z-50">
-                    <ActivityIndicator size="large" color="#ffffff" />
+                    <ActivityIndicator size="large" color="#ffffff"/>
                     <Text className="mt-4 font-semibold text-base text-white/80">
                         {prefetchMessage}
                     </Text>

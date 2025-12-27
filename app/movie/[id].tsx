@@ -72,6 +72,7 @@ export default function MovieDetailScreen() {
                 ]);
                 if (!mounted) return;
                 setVodInfo(info);
+                console.log(JSON.stringify(info.info, null, 2))
                 setFavorites(favs);
                 setResumeItems(resumes);
                 setLoading(false);
@@ -323,7 +324,7 @@ export default function MovieDetailScreen() {
                 <View className="mt-6">
                     {trailerUrl && activeTab === 'trailer' ? (
                         <View className="px-6">
-                            <TrailerCard url={trailerUrl} thumbnail={trailerThumb} />
+                            <TrailerCard url={trailerUrl} thumbnail={trailerThumb}/>
                         </View>
                     ) : (
                         <View className="px-3">

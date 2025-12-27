@@ -2,7 +2,7 @@ import * as SQLite from 'expo-sqlite';
 
 import type {XtreamEpgListing} from './types';
 
-export const EPG_CACHE_TTL_MS = 30 * 60 * 1000;
+export const EPG_CACHE_TTL_MS = 3 * 60 * 60 * 1000;
 
 type EpgCacheEntry = {
   updatedAt: number;

@@ -12,9 +12,9 @@ module.exports = {
         slate: '#2a2a36',
       },
       fontFamily: {
-        display: ['BebasNeue_400Regular', 'System'],
-        body: ['Archivo_400Regular', 'System'],
-        bodySemi: ['Archivo_600SemiBold', 'System'],
+        display: ['Poppins_600SemiBold', 'System'],
+        body: ['Poppins_400Regular', 'System'],
+        bodySemi: ['Poppins_600SemiBold', 'System'],
       },
     },
   },

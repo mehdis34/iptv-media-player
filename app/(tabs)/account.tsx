@@ -176,8 +176,10 @@ export default function AccountScreen() {
 
   return (
     <ScrollView className="flex-1 bg-ink" contentContainerStyle={{ paddingBottom: 60 }}>
-      <View className="px-6 pt-12">
-        <Text className="font-bodySemi text-2xl text-white">Mon compte</Text>
+      <View className="px-6 pb-6 pt-16">
+        <View className="flex-row items-center">
+          <Text className="flex-1 font-display text-3xl text-white">Mon compte</Text>
+        </View>
       </View>
 
       <View className="mt-6 px-6">

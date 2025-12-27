@@ -22,7 +22,8 @@ export const getTvNowInfo = ({
     listingsByChannel: Record<string, XtreamEpgListing[]>;
     isLoading?: boolean;
 }): TvNowInfo => {
-    const image = safeImageUri(stream.stream_icon);
+    const rawIcon = stream.stream_icon?.trim();
+    const image = safeImageUri(rawIcon) ?? (rawIcon ? rawIcon : undefined);
     const channelId = resolveXmltvChannelId(stream, channelIdByName);
     const listings = listingsByChannel[channelId] ?? [];
     const now = new Date();

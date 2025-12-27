@@ -7,8 +7,7 @@ import {useEffect} from 'react';
 import 'react-native-reanimated';
 import './global.css'
 import '@/lib/nativewind';
-import {Archivo_400Regular, Archivo_600SemiBold} from '@expo-google-fonts/archivo';
-import {BebasNeue_400Regular} from '@expo-google-fonts/bebas-neue';
+import {Poppins_400Regular, Poppins_600SemiBold} from '@expo-google-fonts/poppins';
 
 export {
     ErrorBoundary,
@@ -31,9 +30,8 @@ console.warn = (...args) => {
 export default function RootLayout() {
     const [loaded, error] = useFonts({
         SpaceMono: require('../assets/fonts/SpaceMono-Regular.ttf'),
-        BebasNeue_400Regular,
-        Archivo_400Regular,
-        Archivo_600SemiBold,
+        Poppins_400Regular,
+        Poppins_600SemiBold,
         ...FontAwesome.font,
     });
 
