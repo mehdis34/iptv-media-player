@@ -12,7 +12,7 @@ import TvRowContent from '@/components/TvRowContent';
 import {EPG_CACHE_TTL_MS, getEpgCache, isEpgCacheFresh, setEpgCache} from '@/lib/epg-cache';
 import {useFavoritesAndResumesState} from '@/lib/catalog.hooks';
 import {CATALOG_CACHE_TTL_MS} from '@/lib/catalog.utils';
-import {ensureLogoTone as ensureLogoToneCached, getLatestSeries, getLatestVod} from '@/lib/media';
+import {ensureLogoTone as ensureLogoToneCached, getLatestSeries, getLatestVod, safeImageUri} from '@/lib/media';
 import {
     getActiveProfileId,
     getCatalogCache,
@@ -53,9 +53,46 @@ export default function HomeScreen() {
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState('');
     const [prefetchMessage, setPrefetchMessage] = useState('Chargement du catalogue...');
-    const headerHeight = 168;
-    const headerTopPadding = 64;
+    const headerHeight = 150;
+    const headerTopPadding = 56;
     const [isHeaderBlurred, setIsHeaderBlurred] = useState(false);
+    const currentYear = new Date().getFullYear();
+    const previousYear = currentYear - 1;
+
+    const getAdded = (value?: string | number) => {
+        if (value === undefined || value === null) return 0;
+        const numeric = Number(value);
+        return Number.isFinite(numeric) ? numeric : 0;
+    };
+
+    const getReleaseYear = (item: XtreamVod | XtreamSeries) => {
+        const candidate = (item as {releaseDate?: string; releasedate?: string}).releaseDate ??
+            (item as {releasedate?: string}).releasedate;
+        const match = candidate?.match(/\d{4}/);
+        if (match) return Number(match[0]);
+        return 0;
+    };
+
+    const applyRecentYearFilter = <T extends {item: XtreamVod | XtreamSeries}>(
+        items: T[],
+        desiredCount: number
+    ) => {
+        const current = items.filter((entry) => entry.item && getReleaseYear(entry.item) === currentYear);
+        if (current.length >= desiredCount) return current;
+        const previous = items.filter((entry) => getReleaseYear(entry.item) === previousYear);
+        const selected = [...current, ...previous];
+        if (selected.length >= desiredCount) return selected;
+        const selectedKeys = new Set(
+            selected.map((entry) =>
+                'stream_id' in entry.item ? `movie-${entry.item.stream_id}` : `series-${entry.item.series_id}`
+            )
+        );
+        const remaining = items.filter((entry) => {
+            const key = 'stream_id' in entry.item ? `movie-${entry.item.stream_id}` : `series-${entry.item.series_id}`;
+            return !selectedKeys.has(key);
+        });
+        return [...selected, ...remaining];
+    };
 
     const formatPrefetchMessage = (labels: string[]) => {
         if (!labels.length) return 'Chargement du catalogue...';
@@ -331,11 +368,23 @@ export default function HomeScreen() {
     }, [favorites, liveById]);
 
     const recentMovies = useMemo(() => {
-        return vodStreams.slice(-14).reverse();
+        const candidates = vodStreams
+            .filter((item) => !!safeImageUri(item.cover ?? item.stream_icon))
+            .map((item) => ({item, added: getAdded(item.added)}));
+        return applyRecentYearFilter(candidates, 14)
+            .sort((a, b) => b.added - a.added)
+            .slice(0, 14)
+            .map(({item}) => item);
     }, [vodStreams]);
 
     const recentSeries = useMemo(() => {
-        return seriesList.slice(-14).reverse();
+        const candidates = seriesList
+            .filter((item) => !!safeImageUri(item.cover ?? item.backdrop_path?.[0]))
+            .map((item) => ({item, added: getAdded(item.added)}));
+        return applyRecentYearFilter(candidates, 14)
+            .sort((a, b) => b.added - a.added)
+            .slice(0, 14)
+            .map(({item}) => item);
     }, [seriesList]);
 
     const hasCurrentProgram = useCallback(
@@ -513,20 +562,20 @@ export default function HomeScreen() {
                     </View>
                     <View className="mt-3 flex-row gap-1.5">
                         <Pressable
-                            onPress={() => router.push('/series')}
-                            className="flex-1 items-center justify-center rounded-l-full rounded-r-lg border border-white/10 bg-white/5 py-3"
-                        >
-                            <Text className="font-semibold text-base text-white">Séries</Text>
-                        </Pressable>
-                        <Pressable
                             onPress={() => router.push('/movies')}
-                            className="flex-1 items-center justify-center rounded-lg border border-white/10 bg-white/5 py-3"
+                            className="flex-1 items-center justify-center rounded-l-full rounded-r-lg bg-ash py-3"
                         >
                             <Text className="font-semibold text-base text-white">Films</Text>
                         </Pressable>
                         <Pressable
+                            onPress={() => router.push('/series')}
+                            className="flex-1 items-center justify-center rounded-none bg-ash py-3"
+                        >
+                            <Text className="font-semibold text-base text-white">Séries</Text>
+                        </Pressable>
+                        <Pressable
                             onPress={() => router.push('/tv')}
-                            className="flex-1 items-center justify-center rounded-r-full border border-white/10 bg-white/5 py-3"
+                            className="flex-1 items-center justify-center rounded-r-full bg-ash py-3"
                         >
                             <Text className="font-semibold text-base text-white">Chaînes TV</Text>
                         </Pressable>

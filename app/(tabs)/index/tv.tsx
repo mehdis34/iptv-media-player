@@ -16,7 +16,6 @@ import {
 } from 'react-native';
 import {LinearGradient} from 'expo-linear-gradient';
 import {BlurView} from 'expo-blur';
-import {clipShape, fixedSize, glassEffect, padding} from '@expo/ui/swift-ui/modifiers';
 
 import TvRowContent from '@/components/TvRowContent';
 import {clearEpgCache, EPG_CACHE_TTL_MS, getEpgCache, isEpgCacheFresh, setEpgCache} from '@/lib/epg-cache';
@@ -28,7 +27,6 @@ import {getActiveProfileId, getCatalogCache, getCredentials, setCatalogCache,} f
 import {getTvNowInfo} from '@/lib/tv.utils';
 import {fetchLiveCategories, fetchLiveStreams, fetchXmltvEpg} from '@/lib/xtream';
 import type {XtreamCategory, XtreamEpgListing, XtreamStream} from '@/lib/types';
-import {Host, Text as ExpoUiText} from '@expo/ui/swift-ui';
 
 export default function TvScreen() {
     const router = useRouter();
@@ -63,7 +61,7 @@ export default function TvScreen() {
     const tvUnderlineX = useRef(new Animated.Value(0)).current;
     const tvUnderlineWidth = useRef(new Animated.Value(0)).current;
     const tvTabsScrollRef = useRef<ScrollView>(null);
-    const tvThemeListRef = useRef<FlatList<{id: string; name: string}> | null>(null);
+    const tvThemeListRef = useRef<FlatList<{ id: string; name: string }> | null>(null);
     const tvThemeItemHeight = 56;
     const tvThemeItemGap = 16;
     const lastProfileKey = useRef<string | null>(null);
@@ -95,7 +93,7 @@ export default function TvScreen() {
     const guideViewabilityConfig = useRef({itemVisiblePercentThreshold: 60}).current;
     const guideViewableUpdateRef = useRef<{
         timer: ReturnType<typeof setTimeout> | null;
-        pending: Array<{item: XtreamStream}> | null;
+        pending: Array<{ item: XtreamStream }> | null;
     }>({timer: null, pending: null});
 
     const resolveXmltvChannelId = useCallback(
@@ -105,8 +103,8 @@ export default function TvScreen() {
     );
 
     const handleGuideViewableItemsChanged = useCallback(
-        ({viewableItems}: {viewableItems: Array<{item: XtreamStream}>}) => {
-            const run = (items: Array<{item: XtreamStream}>) => {
+        ({viewableItems}: { viewableItems: Array<{ item: XtreamStream }> }) => {
+            const run = (items: Array<{ item: XtreamStream }>) => {
                 const next: Record<string, XtreamEpgListing[]> = {};
                 items.forEach(({item}) => {
                     const channelId = resolveXmltvChannelId(item);
@@ -147,7 +145,7 @@ export default function TvScreen() {
             const bTime = parseEpgDate(b, 'start')?.getTime() ?? 0;
             return aTime - bTime;
         });
-        const sections: Array<{title: string; data: XtreamEpgListing[]}> = [];
+        const sections: Array<{ title: string; data: XtreamEpgListing[] }> = [];
         const sectionMap = new Map<string, XtreamEpgListing[]>();
         sorted.forEach((listing) => {
             const start = parseEpgDate(listing, 'start');
@@ -415,6 +413,7 @@ export default function TvScreen() {
         return () => clearTimeout(timer);
     }, [showTvThemes, selectedTvThemeIndex]);
 
+
     useEffect(() => {
         if (tvTab !== 'guide') return;
         setTvVisibleEpgByChannel({});
@@ -444,55 +443,53 @@ export default function TvScreen() {
     return (
         <View className="flex-1 bg-black">
             <View className="px-6 pt-12 pb-4">
-                <View className="relative flex-row items-center justify-between">
-                    <Pressable
-                        onPress={() => router.back()}
-                        className="h-10 w-10 items-center justify-center"
-                    >
-                        <Ionicons name="chevron-back" size={24} color="#ffffff" />
-                    </Pressable>
-                    <View className={'flex flex-row gap-3'}>
+                <View className="relative">
+                    <View className="flex-row items-center justify-between">
                         <Pressable
-                            onPress={() => setShowTvThemes(true)}
+                            onPress={() => router.back()}
+                            className="h-10 w-10 items-center justify-center"
                         >
-                            <Host matchContents>
-                                <ExpoUiText
-                                    size={12}
-                                    weight="semibold"
-                                    lineLimit={1}
-                                    modifiers={[
-                                        padding({leading: 12, trailing: 32, vertical: 8, horizontal: 16}),
-                                        glassEffect({glass: {variant: 'regular'}}),
-                                        clipShape('roundedRectangle', 999),
-                                        fixedSize({horizontal: true}),
-                                    ]}
-                                >
-                                    {tvCategoryId
-                                        ? `${categories.find(
-                                            (category) => category.category_id === tvCategoryId
-                                        )?.category_name ?? 'Catégorie'}`
-                                        : 'Catégorie'}
-                                </ExpoUiText>
-                            </Host>
+                            <Ionicons name="chevron-back" size={24} color="#ffffff"/>
                         </Pressable>
+                        <Text className="max-w-[60%] font-bold text-xl text-white" numberOfLines={1}>
+                            Chaînes TV
+                        </Text>
                         <Pressable
                             onPress={() => setShowEpgRefreshConfirm(true)}
+                            className="h-10 w-10 items-center justify-center"
                         >
-                            <Host matchContents>
-                                <ExpoUiText
-                                    size={12}
-                                    weight="semibold"
-                                    lineLimit={1}
-                                    modifiers={[
-                                        padding({leading: 12, trailing: 32, vertical: 8, horizontal: 16}),
-                                        glassEffect({glass: {variant: 'regular'}}),
-                                        clipShape('roundedRectangle', 999),
-                                        fixedSize({horizontal: true}),
-                                    ]}
-                                >
-                                    Rafraîchir
-                                </ExpoUiText>
-                            </Host>
+                            {isRefreshingEpg ? (
+                                <ActivityIndicator size="small" color="#ffffff"/>
+                            ) : (
+                                <Ionicons name="refresh" size={20} color="#ffffff"/>
+                            )}
+                        </Pressable>
+                    </View>
+                    <View className="mt-2 items-center">
+                        <Pressable
+                            onPress={() => {
+                                setShowTvThemes(true);
+                            }}
+                            className={`flex-row items-center gap-2 rounded-full px-4 py-2 ${
+                                tvCategoryId ? 'bg-white/90' : 'border border-white/15 bg-white/10'
+                            }`}
+                        >
+                            <Text
+                                className={`font-bodySemi text-sm ${
+                                    tvCategoryId ? 'text-black' : 'text-white'
+                                }`}
+                            >
+                                {tvCategoryId
+                                    ? categories.find(
+                                    (category) => category.category_id === tvCategoryId
+                                )?.category_name ?? 'Catégories'
+                                    : 'Catégories'}
+                            </Text>
+                            <Ionicons
+                                name="chevron-down"
+                                size={16}
+                                color={tvCategoryId ? '#000000' : '#ffffff'}
+                            />
                         </Pressable>
                     </View>
                 </View>
@@ -532,14 +529,15 @@ export default function TvScreen() {
                                     Math.max(
                                         0,
                                         (now.getTime() - currentStart.getTime()) /
-                                            (currentEnd.getTime() - currentStart.getTime())
+                                        (currentEnd.getTime() - currentStart.getTime())
                                     )
                                 )
                                 : null;
                         const visibleListings = tvVisibleEpgByChannel[channelId] ?? [];
                         const isVisible = channelId in tvVisibleEpgByChannel;
                         return (
-                            <View className="w-[33vw] px-2 pb-6 h-full border-r border-white/10" style={{height: '100%'}}>
+                            <View className="w-[33vw] px-2 pb-6 h-full border-r border-white/10"
+                                  style={{height: '100%'}}>
                                 <View
                                     className="h-11 w-24 items-center justify-center overflow-hidden rounded-lg border border-white/10"
                                     style={{
@@ -594,7 +592,8 @@ export default function TvScreen() {
                                                 >
                                                     <View className="flex-row items-center gap-2">
                                                         <View className="h-2.5 w-2.5 rounded-full bg-ember"/>
-                                                        <Text className="font-bodySemi text-[11px] uppercase text-ember">
+                                                        <Text
+                                                            className="font-bodySemi text-[11px] uppercase text-ember">
                                                             Live
                                                         </Text>
                                                     </View>
@@ -607,15 +606,16 @@ export default function TvScreen() {
                                                     <Text className="mt-1 font-body text-xs text-white/70">
                                                         {currentStart && currentEnd
                                                             ? `${formatClock(currentStart)} - ${formatClock(
-                                                                  currentEnd
-                                                              )}`
+                                                                currentEnd
+                                                            )}`
                                                             : '--:--'}{' '}
                                                         {currentListing.category
                                                             ? `| ${decodeEpgText(currentListing.category)}`
                                                             : ''}
                                                     </Text>
                                                     {currentProgress !== null ? (
-                                                        <View className="mt-2 h-1.5 overflow-hidden rounded-full bg-white/15">
+                                                        <View
+                                                            className="mt-2 h-1.5 overflow-hidden rounded-full bg-white/15">
                                                             <View
                                                                 className="h-full rounded-full bg-ember"
                                                                 style={{
@@ -840,22 +840,11 @@ export default function TvScreen() {
                             <Pressable
                                 onPress={handleRefreshEpg}
                                 disabled={isRefreshingEpg}
+                                className="flex-row items-center justify-center rounded-full border border-white/15 bg-white/10 px-5 py-3"
                             >
-                                <Host matchContents>
-                                    <ExpoUiText
-                                        size={16}
-                                        weight="semibold"
-                                        lineLimit={1}
-                                        modifiers={[
-                                            padding({leading: 12, trailing: 32, vertical: 12, horizontal: 20}),
-                                            glassEffect({glass: {variant: 'regular'}}),
-                                            clipShape('roundedRectangle', 999),
-                                            fixedSize({horizontal: true}),
-                                        ]}
-                                    >
-                                        {isRefreshingEpg ? 'Chargement...' : 'Rafraîchir maintenant'}
-                                    </ExpoUiText>
-                                </Host>
+                                <Text className="font-bodySemi text-base text-white">
+                                    {isRefreshingEpg ? 'Chargement...' : 'Rafraîchir maintenant'}
+                                </Text>
                             </Pressable>
                             <Pressable
                                 onPress={() => setShowEpgRefreshConfirm(false)}
@@ -995,7 +984,8 @@ export default function TvScreen() {
             >
                 <View className="flex-1 items-center justify-center px-6">
                     <BlurView intensity={40} tint="dark" className="absolute inset-0"/>
-                    <View className="w-full max-w-[360px] items-center rounded-2xl border border-white/10 bg-black/80 px-6 py-8">
+                    <View
+                        className="w-full max-w-[360px] items-center rounded-2xl border border-white/10 bg-black/80 px-6 py-8">
                         <ActivityIndicator size="large" color="#ffffff"/>
                         <Text className="mt-4 font-bodySemi text-base text-white">
                             {initialLoadingMessage}
