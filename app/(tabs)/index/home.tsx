@@ -1,4 +1,4 @@
-import {useRouter} from 'expo-router';
+import {type Href, useRouter} from 'expo-router';
 import {useFocusEffect} from '@react-navigation/native';
 import {useCallback, useMemo, useRef, useState} from 'react';
 import {ActivityIndicator, FlatList, Pressable, ScrollView, StyleSheet, Text, View,} from 'react-native';
@@ -12,7 +12,7 @@ import TvRowContent from '@/components/TvRowContent';
 import {EPG_CACHE_TTL_MS, getEpgCache, isEpgCacheFresh, setEpgCache} from '@/lib/epg-cache';
 import {useFavoritesAndResumesState} from '@/lib/catalog.hooks';
 import {CATALOG_CACHE_TTL_MS} from '@/lib/catalog.utils';
-import {ensureLogoTone as ensureLogoToneCached, getLatestSeries, getLatestVod, safeImageUri} from '@/lib/media';
+import {ensureLogoTone as ensureLogoToneCached, getLatestVod, safeImageUri} from '@/lib/media';
 import {
     getActiveProfileId,
     getCatalogCache,
@@ -33,7 +33,15 @@ import {
 } from '@/lib/xtream';
 import {getTvNowInfo} from '@/lib/tv.utils';
 import {parseEpgDate, resolveXmltvChannelId} from '@/lib/epg.utils';
-import type {FavoriteItem, ResumeItem, XtreamEpgListing, XtreamSeries, XtreamStream, XtreamVod} from '@/lib/types';
+import type {
+    FavoriteItem,
+    ResumeItem,
+    XtreamCategory,
+    XtreamEpgListing,
+    XtreamSeries,
+    XtreamStream,
+    XtreamVod,
+} from '@/lib/types';
 
 export default function HomeScreen() {
     const router = useRouter();
@@ -41,7 +49,9 @@ export default function HomeScreen() {
     const lastPrefetchProfileRef = useRef<string | null>(null);
     const [isPrefetching, setIsPrefetching] = useState(false);
     const [vodStreams, setVodStreams] = useState<XtreamVod[]>([]);
+    const [vodCategories, setVodCategories] = useState<XtreamCategory[]>([]);
     const [seriesList, setSeriesList] = useState<XtreamSeries[]>([]);
+    const [seriesCategories, setSeriesCategories] = useState<XtreamCategory[]>([]);
     const [liveStreams, setLiveStreams] = useState<XtreamStream[]>([]);
     const {favorites, setFavorites, resumeItems, setResumeItems} = useFavoritesAndResumesState();
     const [tvXmltvListings, setTvXmltvListings] = useState<Record<string, XtreamEpgListing[]>>({});
@@ -56,44 +66,6 @@ export default function HomeScreen() {
     const headerHeight = 150;
     const headerTopPadding = 56;
     const [isHeaderBlurred, setIsHeaderBlurred] = useState(false);
-    const currentYear = new Date().getFullYear();
-    const previousYear = currentYear - 1;
-
-    const getAdded = (value?: string | number) => {
-        if (value === undefined || value === null) return 0;
-        const numeric = Number(value);
-        return Number.isFinite(numeric) ? numeric : 0;
-    };
-
-    const getReleaseYear = (item: XtreamVod | XtreamSeries) => {
-        const candidate = (item as {releaseDate?: string; releasedate?: string}).releaseDate ??
-            (item as {releasedate?: string}).releasedate;
-        const match = candidate?.match(/\d{4}/);
-        if (match) return Number(match[0]);
-        return 0;
-    };
-
-    const applyRecentYearFilter = <T extends {item: XtreamVod | XtreamSeries}>(
-        items: T[],
-        desiredCount: number
-    ) => {
-        const current = items.filter((entry) => entry.item && getReleaseYear(entry.item) === currentYear);
-        if (current.length >= desiredCount) return current;
-        const previous = items.filter((entry) => getReleaseYear(entry.item) === previousYear);
-        const selected = [...current, ...previous];
-        if (selected.length >= desiredCount) return selected;
-        const selectedKeys = new Set(
-            selected.map((entry) =>
-                'stream_id' in entry.item ? `movie-${entry.item.stream_id}` : `series-${entry.item.series_id}`
-            )
-        );
-        const remaining = items.filter((entry) => {
-            const key = 'stream_id' in entry.item ? `movie-${entry.item.stream_id}` : `series-${entry.item.series_id}`;
-            return !selectedKeys.has(key);
-        });
-        return [...selected, ...remaining];
-    };
-
     const formatPrefetchMessage = (labels: string[]) => {
         if (!labels.length) return 'Chargement du catalogue...';
         if (labels.length === 1) return `Chargement ${labels[0]}...`;
@@ -143,7 +115,9 @@ export default function HomeScreen() {
                         now - cache.updatedAt.seriesList < CATALOG_CACHE_TTL_MS;
                     let liveStreams = cache.data.liveStreams ?? [];
                     let vodStreams = cache.data.vodStreams ?? [];
+                    let vodCategories = cache.data.vodCategories ?? [];
                     let seriesList = cache.data.seriesList ?? [];
+                    let seriesCategories = cache.data.seriesCategories ?? [];
 
                     const cachedEpg = await getEpgCache(profileId);
                     const needsEpg = !cachedEpg || !isEpgCacheFresh(cachedEpg, EPG_CACHE_TTL_MS);
@@ -182,6 +156,7 @@ export default function HomeScreen() {
                         ]);
                         if (!mounted) return;
                         vodStreams = vod;
+                        vodCategories = vodCats;
                         tasks.push(setCatalogCache({vodCategories: vodCats, vodStreams: vod}));
                     }
 
@@ -193,6 +168,7 @@ export default function HomeScreen() {
                         ]);
                         if (!mounted) return;
                         seriesList = series;
+                        seriesCategories = seriesCats;
                         tasks.push(setCatalogCache({seriesCategories: seriesCats, seriesList: series}));
                     }
 
@@ -214,7 +190,9 @@ export default function HomeScreen() {
                     if (mounted) {
                         setLiveStreams(liveStreams);
                         setVodStreams(vodStreams);
+                        setVodCategories(vodCategories);
                         setSeriesList(seriesList);
+                        setSeriesCategories(seriesCategories);
                     }
                 } finally {
                     if (mounted) {
@@ -241,13 +219,21 @@ export default function HomeScreen() {
                 try {
                     const profileId = await getActiveProfileId();
                     const [cache, favs, resumes] = await Promise.all([
-                        getCatalogCache(['vodStreams', 'seriesList', 'liveStreams']),
+                        getCatalogCache([
+                            'vodStreams',
+                            'vodCategories',
+                            'seriesList',
+                            'seriesCategories',
+                            'liveStreams',
+                        ]),
                         getFavoriteItems(),
                         getResumeItems(),
                     ]);
                     if (!mounted) return;
                     setVodStreams(cache.data.vodStreams ?? []);
+                    setVodCategories(cache.data.vodCategories ?? []);
                     setSeriesList(cache.data.seriesList ?? []);
+                    setSeriesCategories(cache.data.seriesCategories ?? []);
                     setLiveStreams(cache.data.liveStreams ?? []);
                     setFavorites(favs);
                     setResumeItems(resumes);
@@ -368,24 +354,20 @@ export default function HomeScreen() {
     }, [favorites, liveById]);
 
     const recentMovies = useMemo(() => {
-        const candidates = vodStreams
+        const firstCategoryId = vodCategories[0]?.category_id;
+        return vodStreams
+            .filter((item) => item.category_id === firstCategoryId)
             .filter((item) => !!safeImageUri(item.cover ?? item.stream_icon))
-            .map((item) => ({item, added: getAdded(item.added)}));
-        return applyRecentYearFilter(candidates, 14)
-            .sort((a, b) => b.added - a.added)
-            .slice(0, 14)
-            .map(({item}) => item);
-    }, [vodStreams]);
+            .slice(0, 14);
+    }, [vodCategories, vodStreams]);
 
     const recentSeries = useMemo(() => {
-        const candidates = seriesList
+        const firstCategoryId = seriesCategories[0]?.category_id;
+        return seriesList
+            .filter((item) => item.category_id === firstCategoryId)
             .filter((item) => !!safeImageUri(item.cover ?? item.backdrop_path?.[0]))
-            .map((item) => ({item, added: getAdded(item.added)}));
-        return applyRecentYearFilter(candidates, 14)
-            .sort((a, b) => b.added - a.added)
-            .slice(0, 14)
-            .map(({item}) => item);
-    }, [seriesList]);
+            .slice(0, 14);
+    }, [seriesCategories, seriesList]);
 
     const hasCurrentProgram = useCallback(
         (stream: XtreamStream) => {
@@ -487,9 +469,25 @@ export default function HomeScreen() {
             };
         }
         const latestMovie = getLatestVod(vodStreams);
-        const latestSeries = getLatestSeries(seriesList);
-        return latestMovie ?? latestSeries;
-    }, [continueItems, seriesList, vodStreams]);
+        const firstCategoryId = seriesCategories[0]?.category_id;
+        const latestSeries =
+            seriesList.find(
+                (item) =>
+                    item.category_id === firstCategoryId &&
+                    !!safeImageUri(item.cover ?? item.backdrop_path?.[0])
+            ) ??
+            seriesList.find((item) => !!safeImageUri(item.cover ?? item.backdrop_path?.[0])) ??
+            null;
+        if (latestMovie) return latestMovie;
+        if (!latestSeries) return null;
+        return {
+            id: latestSeries.series_id,
+            type: 'series' as const,
+            title: latestSeries.name,
+            image: safeImageUri(latestSeries.cover ?? latestSeries.backdrop_path?.[0]),
+            badge: 'Série',
+        };
+    }, [continueItems, seriesCategories, seriesList, vodStreams]);
 
     const handleToggleFavorite = async (type: FavoriteItem['type'], id: number) => {
         const next = await toggleFavoriteItem(type, id);
@@ -562,19 +560,19 @@ export default function HomeScreen() {
                     </View>
                     <View className="mt-3 flex-row gap-1.5">
                         <Pressable
-                            onPress={() => router.push('/movies')}
+                            onPress={() => router.push('/movies' as Href)}
                             className="flex-1 items-center justify-center rounded-l-full rounded-r-lg bg-ash py-3"
                         >
                             <Text className="font-semibold text-base text-white">Films</Text>
                         </Pressable>
                         <Pressable
-                            onPress={() => router.push('/series')}
+                            onPress={() => router.push('/series' as Href)}
                             className="flex-1 items-center justify-center rounded-none bg-ash py-3"
                         >
                             <Text className="font-semibold text-base text-white">Séries</Text>
                         </Pressable>
                         <Pressable
-                            onPress={() => router.push('/tv')}
+                            onPress={() => router.push('/tv' as Href)}
                             className="flex-1 items-center justify-center rounded-r-full bg-ash py-3"
                         >
                             <Text className="font-semibold text-base text-white">Chaînes TV</Text>
@@ -672,7 +670,7 @@ export default function HomeScreen() {
 
                 {favoriteMedia.length ? (
                     <View className="pt-6">
-                        <SectionHeader title="Ma liste"/>
+                        <SectionHeader title="Ma liste" link="/library"/>
                         <FlatList
                             horizontal
                             showsHorizontalScrollIndicator={false}
@@ -703,7 +701,7 @@ export default function HomeScreen() {
                 {recentMovies.length ? (
                     <View className="pt-6">
                         <SectionHeader
-                            title="Films récents"
+                            title="Ces films devraient vous plaire"
                             link="/movies"
                         />
                         <FlatList
@@ -730,7 +728,7 @@ export default function HomeScreen() {
                 {recentSeries.length ? (
                     <View className="pt-6">
                         <SectionHeader
-                            title="Séries récentes"
+                            title="Séries à découvrir"
                             link="/series"
                         />
                         <FlatList
@@ -758,7 +756,7 @@ export default function HomeScreen() {
                     <View className="pt-6">
                         <SectionHeader
                             title="Chaînes favorites"
-                            link="/tv"
+                            link="/library?tab=tv"
                         />
                         <View className="mt-2">
                             {favoriteChannelsWithEpg.slice(0, 10).map((item, index, list) =>

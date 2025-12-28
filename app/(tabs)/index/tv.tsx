@@ -1,5 +1,5 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
-import {useRouter} from 'expo-router';
+import {type Href, useRouter} from 'expo-router';
 import {useFocusEffect} from '@react-navigation/native';
 import {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {
@@ -433,7 +433,7 @@ export default function TvScreen() {
                 <Text className="font-body text-ember">{error}</Text>
                 <Pressable
                     className="mt-4 rounded-full border border-ash px-6 py-2"
-                    onPress={() => router.replace('/tv')}>
+                    onPress={() => router.replace('/tv' as Href)}>
                     <Text className="font-body text-white">Réessayer</Text>
                 </Pressable>
             </View>

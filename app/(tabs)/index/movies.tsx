@@ -1,4 +1,4 @@
-import {useRouter} from 'expo-router';
+import {type Href, useRouter} from 'expo-router';
 import {useFocusEffect} from '@react-navigation/native';
 import {type ReactNode, useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {
@@ -21,7 +21,7 @@ import MediaCard from '@/components/MediaCard';
 import MediaGrid from '@/components/MediaGrid';
 import SectionHeader from '@/components/SectionHeader';
 import {useFavoritesAndResumesState} from '@/lib/catalog.hooks';
-import {getDominantColor, getLatestVod, safeImageUri} from '@/lib/media';
+import {getDominantColor, safeImageUri} from '@/lib/media';
 import {applyFavoritesAndResumes, CATALOG_CACHE_TTL_MS, shouldReloadForProfile} from '@/lib/catalog.utils';
 import {getCatalogCache, getCredentials, setCatalogCache, toggleFavoriteItem} from '@/lib/storage';
 import {fetchVodCategories, fetchVodStreams} from '@/lib/xtream';
@@ -58,9 +58,13 @@ export default function MoviesScreen() {
     const lastProfileKey = useRef<string | null>(null);
     const hasLoadedOnce = useRef(false);
     const categoryListRef = useRef<FlatList<XtreamCategory> | null>(null);
+    const categoryListScrollRef = useRef<FlatList<MovieRow> | null>(null);
+    const categoryGridScrollRef = useRef<FlatList<XtreamVod> | null>(null);
     const categoryButtonScale = useRef(new Animated.Value(1)).current;
     const categoryItemHeight = 56;
     const categoryItemGap = 12;
+
+    const orderedVodStreams = useMemo(() => vodStreams, [vodStreams]);
 
     const resumeMovieMap = useMemo(() => {
         const map = new Map<number, ResumeItem>();
@@ -72,8 +76,8 @@ export default function MoviesScreen() {
 
     const selectedCategoryItems = useMemo(() => {
         if (!selectedCategoryId) return [];
-        return vodStreams.filter((stream) => stream.category_id === selectedCategoryId);
-    }, [selectedCategoryId, vodStreams]);
+        return orderedVodStreams.filter((stream) => stream.category_id === selectedCategoryId);
+    }, [orderedVodStreams, selectedCategoryId]);
 
     const categoryHero = useMemo(() => {
         const first = selectedCategoryItems[0];
@@ -88,9 +92,26 @@ export default function MoviesScreen() {
         };
     }, [selectedCategoryItems]);
 
+    const defaultHero = useMemo(() => {
+        const firstCategoryId = vodCategories[0]?.category_id;
+        const firstFromCategory = firstCategoryId
+            ? orderedVodStreams.find((stream) => stream.category_id === firstCategoryId)
+            : null;
+        const first = firstFromCategory ?? orderedVodStreams[0];
+        if (!first) return null;
+        return {
+            id: first.stream_id,
+            type: 'movie' as const,
+            extension: first.container_extension,
+            title: first.name,
+            image: safeImageUri(first.cover ?? first.stream_icon),
+            badge: 'Film',
+        };
+    }, [orderedVodStreams, vodCategories]);
+
     const hero = useMemo(
-        () => (selectedCategoryId ? categoryHero : getLatestVod(vodStreams)),
-        [categoryHero, selectedCategoryId, vodStreams]
+        () => (selectedCategoryId ? categoryHero : defaultHero),
+        [categoryHero, defaultHero, selectedCategoryId]
     );
     const selectedCategory = useMemo(
         () => vodCategories.find((category) => category.category_id === selectedCategoryId),
@@ -123,6 +144,30 @@ export default function MoviesScreen() {
             }),
         ]).start();
     }, [categoryButtonScale, selectedCategoryId]);
+
+    useEffect(() => {
+        if (!showMovieCategories) return;
+        if (!selectedCategoryId) return;
+        const index = vodCategories.findIndex(
+            (category) => category.category_id === selectedCategoryId
+        );
+        if (index < 0) return;
+        const handle = requestAnimationFrame(() => {
+            categoryListRef.current?.scrollToIndex({index, animated: true});
+        });
+        return () => cancelAnimationFrame(handle);
+    }, [selectedCategoryId, showMovieCategories, vodCategories]);
+
+    useEffect(() => {
+        const handle = requestAnimationFrame(() => {
+            if (selectedCategoryId) {
+                categoryGridScrollRef.current?.scrollToOffset({offset: 0, animated: false});
+                return;
+            }
+            categoryListScrollRef.current?.scrollToOffset({offset: 0, animated: false});
+        });
+        return () => cancelAnimationFrame(handle);
+    }, [selectedCategoryId]);
 
     const loadData = useCallback(() => {
         let mounted = true;
@@ -209,23 +254,17 @@ export default function MoviesScreen() {
         setIsHeaderBlurred((prev) => (prev !== next ? next : prev));
     };
 
-    const makeCategoryHref = (id: string, name?: string): CategoryParams => ({
-        type: 'movies',
-        id,
-        name,
-    });
-
     const vodRows = useMemo(() => {
         const categories = selectedCategoryId
             ? vodCategories.filter((category) => category.category_id === selectedCategoryId)
             : vodCategories;
         return categories.map((category) => ({
             category,
-            items: vodStreams
+            items: orderedVodStreams
                 .filter((stream) => stream.category_id === category.category_id)
                 .slice(0, 12),
         }));
-    }, [selectedCategoryId, vodCategories, vodStreams]);
+    }, [orderedVodStreams, selectedCategoryId, vodCategories]);
 
     const movieRows = useMemo<MovieRow[]>(() => {
         if (selectedCategoryId) {
@@ -233,24 +272,24 @@ export default function MoviesScreen() {
                 key: row.category.category_id,
                 title: row.category.category_name,
                 items: row.items,
-                href: makeCategoryHref(row.category.category_id, row.category.category_name),
+                href: {
+                    type: 'movies',
+                    id: row.category.category_id,
+                    name: row.category.category_name,
+                },
             }));
         }
-        return [
-            {
-                key: 'popular',
-                title: 'Films populaires',
-                items: vodStreams.slice(0, 14),
-                href: makeCategoryHref('all', 'Films populaires'),
+        return vodRows.map((row) => ({
+            key: row.category.category_id,
+            title: row.category.category_name,
+            items: row.items,
+            href: {
+                type: 'movies',
+                id: row.category.category_id,
+                name: row.category.category_name,
             },
-            ...vodRows.map((row) => ({
-                key: row.category.category_id,
-                title: row.category.category_name,
-                items: row.items,
-                href: makeCategoryHref(row.category.category_id, row.category.category_name),
-            })),
-        ];
-    }, [selectedCategoryId, vodRows, vodStreams]);
+        }));
+    }, [orderedVodStreams, selectedCategoryId, vodRows]);
 
     const renderHeader = useCallback(() => {
         if (!hero) return <View className="px-6 pb-6"/>;
@@ -299,31 +338,41 @@ export default function MoviesScreen() {
         );
     }, [favorites, hero, resumeMovieMap, router]);
 
+    const renderMovieCard = useCallback(
+        (item: XtreamVod, size?: 'grid') => (
+            <MediaCard
+                title={item.name}
+                image={item.cover ?? item.stream_icon}
+                progress={(() => {
+                    const resume = resumeMovieMap.get(item.stream_id);
+                    if (!resume || !resume.durationSec) return undefined;
+                    return resume.positionSec / resume.durationSec;
+                })()}
+                size={size}
+                onPress={() =>
+                    router.push({
+                        pathname: '/movie/[id]' as const,
+                        params: {id: String(item.stream_id), name: item.name},
+                    })
+                }
+            />
+        ),
+        [resumeMovieMap, router]
+    );
+
     const renderRow = useCallback(
         (item: MovieRow) => (
-            <Section title={item.title} href={item.href}>
+            <Section
+                title={item.title}
+                href={item.href}
+                onPress={() => setSelectedCategoryId(item.href?.id ?? null)}
+            >
                 <FlatList<XtreamVod>
                     horizontal
                     showsHorizontalScrollIndicator={false}
                     data={item.items}
                     keyExtractor={(entry) => `vod-${entry.stream_id}`}
-                    renderItem={({item: entry}) => (
-                        <MediaCard
-                            title={entry.name}
-                            image={entry.cover ?? entry.stream_icon}
-                            progress={(() => {
-                                const resume = resumeMovieMap.get(entry.stream_id);
-                                if (!resume || !resume.durationSec) return undefined;
-                                return resume.positionSec / resume.durationSec;
-                            })()}
-                            onPress={() =>
-                                router.push({
-                                    pathname: '/movie/[id]' as const,
-                                    params: {id: String(entry.stream_id), name: entry.name},
-                                })
-                            }
-                        />
-                    )}
+                    renderItem={({item: entry}) => renderMovieCard(entry)}
                     contentContainerStyle={{paddingLeft: 24, paddingRight: 24, gap: 16}}
                     initialNumToRender={8}
                     maxToRenderPerBatch={8}
@@ -332,7 +381,7 @@ export default function MoviesScreen() {
                 />
             </Section>
         ),
-        [resumeMovieMap, router]
+        [renderMovieCard, setSelectedCategoryId]
     );
 
     const renderCategoryHeader = useCallback(() => {
@@ -400,7 +449,7 @@ export default function MoviesScreen() {
                 <Text className="font-body text-ember">{error}</Text>
                 <Pressable
                     className="mt-4 rounded-full border border-ash px-6 py-2"
-                    onPress={() => router.replace('/movies')}>
+                    onPress={() => router.replace('/movies' as Href)}>
                     <Text className="font-body text-white">Réessayer</Text>
                 </Pressable>
             </View>
@@ -485,13 +534,14 @@ export default function MoviesScreen() {
                 </View>
             </View>
             {selectedCategoryId ? (
-                <MediaGrid<XtreamVod>
+                <MediaGrid
                     className="flex-1"
                     data={selectedCategoryItems}
                     keyExtractor={(item) => `vod-${item.stream_id}`}
                     columnWrapperStyle={{paddingHorizontal: 12, marginBottom: 12}}
                     scrollEnabled
                     showsVerticalScrollIndicator={false}
+                    ref={categoryGridScrollRef}
                     ListHeaderComponent={renderCategoryHeader}
                     onScroll={handleScroll}
                     scrollEventThrottle={16}
@@ -500,27 +550,11 @@ export default function MoviesScreen() {
                     maxToRenderPerBatch={9}
                     windowSize={7}
                     removeClippedSubviews
-                    renderItem={({item}) => (
-                        <MediaCard
-                            title={item.name}
-                            image={item.cover ?? item.stream_icon}
-                            progress={(() => {
-                                const resume = resumeMovieMap.get(item.stream_id);
-                                if (!resume || !resume.durationSec) return undefined;
-                                return resume.positionSec / resume.durationSec;
-                            })()}
-                            size="grid"
-                            onPress={() =>
-                                router.push({
-                                    pathname: '/movie/[id]' as const,
-                                    params: {id: String(item.stream_id), name: item.name},
-                                })
-                            }
-                        />
-                    )}
+                    renderItem={({item}) => renderMovieCard(item, 'grid')}
                 />
             ) : (
                 <FlatList<MovieRow>
+                    ref={categoryListScrollRef}
                     className="flex-1"
                     data={movieRows}
                     keyExtractor={(item) => item.key}
@@ -560,8 +594,8 @@ export default function MoviesScreen() {
                 animationType="fade"
                 onRequestClose={() => setShowMovieCategories(false)}
             >
-                <View className="flex-1 items-center justify-center">
-                    <BlurView intensity={40} tint="dark" className="absolute inset-0"/>
+                <View className="flex-1 items-center justify-center bg-ash/50">
+                    <BlurView intensity={50} tint="dark" className="absolute inset-0"/>
                     <Pressable
                         onPress={() => setShowMovieCategories(false)}
                         className="absolute inset-0"
@@ -588,6 +622,25 @@ export default function MoviesScreen() {
                             onScrollToIndexFailed={() => {
                                 categoryListRef.current?.scrollToOffset({offset: 0, animated: false});
                             }}
+                            ListHeaderComponent={
+                                <Pressable
+                                    onPress={() => {
+                                        setSelectedCategoryId(null);
+                                        setShowMovieCategories(false);
+                                    }}
+                                    style={{height: categoryItemHeight, justifyContent: 'center'}}
+                                    className="rounded-full px-6"
+                                >
+                                    <Text
+                                        className={`font-bodySemi text-xl text-center ${
+                                            selectedCategoryId ? 'text-white/60' : 'text-white'
+                                        }`}
+                                    >
+                                        Tous les films
+                                    </Text>
+                                </Pressable>
+                            }
+                            ListHeaderComponentStyle={{marginBottom: categoryItemGap}}
                             renderItem={({item}) => {
                                 const selected = item.category_id === selectedCategoryId;
                                 return (
@@ -600,7 +653,7 @@ export default function MoviesScreen() {
                                         className="rounded-full px-6"
                                     >
                                         <Text
-                                            className={`font-bodySemi text-xl ${
+                                            className={`font-bodySemi text-xl text-center ${
                                                 selected ? 'text-white' : 'text-white/60'
                                             }`}
                                         >
@@ -623,15 +676,17 @@ export default function MoviesScreen() {
 function Section({
                      title,
                      href,
+                     onPress,
                      children,
                  }: {
     title: string;
     href?: CategoryParams;
+    onPress?: () => void;
     children: ReactNode;
 }) {
     return (
         <View>
-            <SectionHeader title={title} href={href}/>
+            <SectionHeader title={title} href={href} onPress={onPress}/>
             {children}
         </View>
     );

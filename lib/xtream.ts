@@ -7,6 +7,7 @@ import type {
   XtreamVodInfo,
   XtreamSeriesInfo,
   XtreamEpgListing,
+  XtreamAccountInfo,
 } from './types';
 import {XMLParser} from 'fast-xml-parser';
 import {normalizeXmltvName} from './epg.utils';
@@ -59,6 +60,15 @@ export async function validateCredentials(creds: XtreamCredentials) {
     throw new Error("Identifiants invalides. Vérifiez l'hôte et le mot de passe.");
   }
   return data;
+}
+
+export async function fetchAccountInfo(creds: XtreamCredentials) {
+  const url = buildApiUrl(creds);
+  const res = await fetch(url);
+  if (!res.ok) {
+    throw new Error('Impossible de charger les informations du compte.');
+  }
+  return (await res.json()) as XtreamAccountInfo;
 }
 
 export async function fetchLiveCategories(creds: XtreamCredentials) {

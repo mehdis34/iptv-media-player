@@ -87,11 +87,16 @@ export default function PlayerScreen() {
     const zapUnderlineX = useRef(new Animated.Value(0)).current;
     const zapUnderlineWidth = useRef(new Animated.Value(0)).current;
     const zapTabsScrollRef = useRef<ScrollView>(null);
+    const zapListRef = useRef<FlatList<XtreamStream>>(null);
+    const pendingZapScrollId = useRef<number | null>(null);
+    const zapScrollRetryRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const zapClearPendingRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const zapItemHeight = 72;
     const lastZapScrollId = useRef<string | null>(null);
     const hasLoadedZapCategories = useRef(false);
     const isLive = params.type === 'tv';
     const isSidePanelOpen = isLive && activeSidePanel !== null;
-    const zapWidth = Math.round(width * 0.3);
+    const zapWidth = Math.round(width * 0.4);
     const playerWidthValue = Math.max(0, width - zapWidth);
     const playerWidth = zapAnim.interpolate({
         inputRange: [0, 1],
@@ -138,6 +143,14 @@ export default function PlayerScreen() {
     useEffect(() => {
         if (activeSidePanel !== 'zap') {
             lastZapScrollId.current = null;
+            if (zapScrollRetryRef.current) {
+                clearTimeout(zapScrollRetryRef.current);
+                zapScrollRetryRef.current = null;
+            }
+            if (zapClearPendingRef.current) {
+                clearTimeout(zapClearPendingRef.current);
+                zapClearPendingRef.current = null;
+            }
             return;
         }
         if (!zapCategoryId) return;
@@ -150,6 +163,51 @@ export default function PlayerScreen() {
         }, 0);
         return () => clearTimeout(timer);
     }, [activeSidePanel, zapCategoryId, zapTabLayouts]);
+
+    useEffect(() => {
+        if (!isLive || activeSidePanel !== 'zap' || !zapCategoryId) return;
+        const streamId = Number(params.id);
+        if (!Number.isFinite(streamId)) return;
+        pendingZapScrollId.current = streamId;
+    }, [activeSidePanel, isLive, params.id, zapCategoryId]);
+
+    const scrollZapToActive = useCallback(() => {
+        if (!zapCategoryId) return;
+        const list = zapStreamsByCategory[zapCategoryId];
+        if (!list?.length) return;
+        const targetId = pendingZapScrollId.current;
+        if (!targetId) return;
+        if (!zapListRef.current) {
+            if (zapScrollRetryRef.current) clearTimeout(zapScrollRetryRef.current);
+            zapScrollRetryRef.current = setTimeout(() => {
+                scrollZapToActive();
+            }, 120);
+            return;
+        }
+        const index = list.findIndex((stream) => stream.stream_id === targetId);
+        if (index < 0) return;
+        requestAnimationFrame(() => {
+            zapListRef.current?.scrollToOffset({
+                offset: Math.max(0, index * zapItemHeight),
+                animated: false,
+            });
+            if (zapClearPendingRef.current) clearTimeout(zapClearPendingRef.current);
+            zapClearPendingRef.current = setTimeout(() => {
+                pendingZapScrollId.current = null;
+            }, 300);
+        });
+    }, [zapCategoryId, zapStreamsByCategory]);
+
+    useEffect(() => {
+        if (activeSidePanel !== 'zap') return;
+        scrollZapToActive();
+    }, [activeSidePanel, scrollZapToActive]);
+
+    useEffect(() => {
+        if (activeSidePanel !== 'zap') return;
+        if (!zapStreams.length) return;
+        scrollZapToActive();
+    }, [activeSidePanel, scrollZapToActive, zapStreams, zapCategoryId]);
 
     useEffect(() => {
         let mounted = true;
@@ -1160,7 +1218,7 @@ export default function PlayerScreen() {
                                                         size={18}
                                                         color="#ffffff"
                                                     />
-                                                    <Text className="font-bold text-base text-white">Zap</Text>
+                                                    <Text className="font-bold text-base text-white">ZAP</Text>
                                                 </Pressable>
                                             </>
                                         )}
@@ -1227,12 +1285,15 @@ export default function PlayerScreen() {
                             style={{width: zapPanelWidth}}
                             pointerEvents={activeSidePanel ? 'auto' : 'none'}
                         >
-                            {activeSidePanel === 'epg' ? (
+                                    {activeSidePanel === 'epg' ? (
                                 <>
                                     <View className="flex-row items-center justify-between">
-                                        <Text className="font-bodySemi text-lg text-white">
-                                            À suivre
-                                        </Text>
+                                        <View className="flex-row items-center gap-2">
+                                            <Ionicons name="time-outline" size={18} color="#ffffff"/>
+                                            <Text className="font-bodySemi text-lg text-white">
+                                                À suivre
+                                            </Text>
+                                        </View>
                                         <Pressable onPress={() => setActiveSidePanel(null)}>
                                             <Ionicons name="close" size={20} color="#ffffff"/>
                                         </Pressable>
@@ -1302,9 +1363,12 @@ export default function PlayerScreen() {
                             ) : activeSidePanel === 'zap' ? (
                                 <>
                                     <View className="flex-row items-center justify-between">
-                                        <Text className="font-bodySemi text-lg text-white">
-                                            Zap
-                                        </Text>
+                                        <View className="flex-row items-center gap-2">
+                                            <MaterialCommunityIcons name="remote-tv" size={18} color="#ffffff"/>
+                                            <Text className="font-bodySemi text-lg text-white">
+                                                ZAP
+                                            </Text>
+                                        </View>
                                         <Pressable onPress={() => setActiveSidePanel(null)}>
                                             <Ionicons name="close" size={20} color="#ffffff"/>
                                         </Pressable>
@@ -1390,15 +1454,40 @@ export default function PlayerScreen() {
                                             </View>
                                         ) : zapStreams.length ? (
                                             <FlatList
+                                                ref={zapListRef}
                                                 data={zapStreams}
                                                 keyExtractor={(item) => String(item.stream_id)}
                                                 showsVerticalScrollIndicator={false}
                                                 contentContainerStyle={{paddingBottom: 24}}
+                                                getItemLayout={(_, index) => ({
+                                                    length: zapItemHeight,
+                                                    offset: zapItemHeight * index,
+                                                    index,
+                                                })}
                                                 initialNumToRender={12}
                                                 maxToRenderPerBatch={12}
                                                 windowSize={5}
                                                 removeClippedSubviews
+                                                onContentSizeChange={() => {
+                                                    scrollZapToActive();
+                                                }}
+                                                onScrollToIndexFailed={({index}) => {
+                                                    const streamId = Number(params.id);
+                                                    if (Number.isFinite(streamId)) {
+                                                        pendingZapScrollId.current = streamId;
+                                                    }
+                                                    zapListRef.current?.scrollToOffset({
+                                                        offset: Math.max(0, index * zapItemHeight),
+                                                        animated: true,
+                                                    });
+                                                    if (zapScrollRetryRef.current) clearTimeout(zapScrollRetryRef.current);
+                                                    zapScrollRetryRef.current = setTimeout(() => {
+                                                        scrollZapToActive();
+                                                    }, 120);
+                                                }}
                                                 renderItem={({item}) => {
+                                                    const isActiveStream =
+                                                        Number(params.id) === item.stream_id;
                                                     const icon = safeImageUri(item.stream_icon);
                                                     const channelId = resolveXmltvChannelId(item);
                                                     const listings =
@@ -1440,7 +1529,9 @@ export default function PlayerScreen() {
                                                     return (
                                                         <Pressable
                                                             onPress={() => handleZapStreamPress(item)}
-                                                            className="border-b border-white/10 py-3"
+                                                            className={`border-b border-white/10 py-3 ${
+                                                                isActiveStream ? 'bg-white/10' : ''
+                                                            }`}
                                                         >
                                                             <TvRowContent
                                                                 image={icon}

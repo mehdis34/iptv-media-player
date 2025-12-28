@@ -1,6 +1,6 @@
-import {useCallback, useMemo, useRef, useState} from 'react';
+import {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {Alert, FlatList, Image, Pressable, Text, View} from 'react-native';
-import {useRouter} from 'expo-router';
+import {useLocalSearchParams, useRouter} from 'expo-router';
 import {useFocusEffect} from '@react-navigation/native';
 import Ionicons from '@expo/vector-icons/Ionicons';
 
@@ -16,6 +16,7 @@ type LibraryItem =
 
 export default function LibraryScreen() {
     const router = useRouter();
+    const {tab} = useLocalSearchParams<{ tab?: string }>();
     const [streams, setStreams] = useState<XtreamStream[]>([]);
     const [movies, setMovies] = useState<XtreamVod[]>([]);
     const [series, setSeries] = useState<XtreamSeries[]>([]);
@@ -81,6 +82,15 @@ export default function LibraryScreen() {
                 active = false;
             };
         }, [])
+    );
+
+    useFocusEffect(
+        useCallback(() => {
+            if (!tab) return;
+            if (tab === 'movie' || tab === 'series' || tab === 'tv') {
+                setActiveFilter(tab);
+            }
+        }, [tab])
     );
 
     const filteredItems = useMemo<LibraryItem[]>(() => {

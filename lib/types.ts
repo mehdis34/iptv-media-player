@@ -147,3 +147,26 @@ export type XtreamEpgListing = {
   channel_id?: string | number;
   category?: string;
 };
+
+export type XtreamAccountInfo = {
+  user_info?: {
+    username?: string;
+    status?: string;
+    exp_date?: string | number;
+    created_at?: string | number;
+    is_trial?: string | number;
+    active_cons?: string | number;
+    max_connections?: string | number;
+    allowed_output_formats?: string[];
+    message?: string;
+  };
+  server_info?: {
+    url?: string;
+    port?: string | number;
+    https_port?: string | number;
+    server_protocol?: string;
+    timezone?: string;
+    time_now?: string;
+    timestamp_now?: string | number;
+  };
+};

@@ -261,6 +261,8 @@ export default function SearchScreen() {
     const mediaList = query.trim() ? mediaResults : mediaSuggested;
     const listPaddingTop = query.trim() ? 0 : 16;
     const hasMedia = mediaList.length > 0;
+    const hasTv = query.trim() ? tvResults.length > 0 : tvSuggested.length > 0;
+    const showEmptyState = !hasMedia && !hasTv;
     const renderTvCard = (stream: XtreamStream, marginRight = true) => {
         const logo = safeImageUri(stream.stream_icon);
         return (
@@ -449,6 +451,7 @@ export default function SearchScreen() {
                 }}
                 ListFooterComponent={<View className="h-10"/>}
                 ListEmptyComponent={
+                    showEmptyState ? (
                     <View className="flex-1 items-center justify-center px-16 pb-16 pt-8">
                         <Text className="text-center font-bodySemi text-3xl text-white">
                             Désolé ! Nous n'avons pas trouvé ce titre.
@@ -457,6 +460,7 @@ export default function SearchScreen() {
                             Essayez un autre titre de film, série ou chaîne TV.
                         </Text>
                     </View>
+                    ) : null
                 }
             />
         </View>
