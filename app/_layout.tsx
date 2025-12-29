@@ -8,15 +8,11 @@ import 'react-native-reanimated';
 import './global.css'
 import '@/lib/nativewind';
 import {Poppins_400Regular, Poppins_600SemiBold} from '@expo-google-fonts/poppins';
+import {Platform} from "react-native";
 
 export {
     ErrorBoundary,
 } from 'expo-router';
-
-export const unstable_settings = {
-    // Ensure that reloading on `/modal` keeps a back button present.
-    initialRouteName: 'index',
-};
 
 SplashScreen.preventAutoHideAsync().then();
 const originalWarn = console.warn;
@@ -46,6 +42,7 @@ export default function RootLayout() {
         }
     }, [loaded]);
 
+
     if (!loaded) {
         return null;
     }
@@ -56,8 +53,14 @@ export default function RootLayout() {
 function RootLayoutNav() {
     return (
         <ThemeProvider value={DarkTheme}>
-            <Stack screenOptions={{headerShown: false, gestureEnabled: true}}>
+            <Stack
+                screenOptions={{
+                    headerShown: false,
+                    gestureEnabled: true,
+                    orientation: Platform.isTV ? 'landscape' : 'portrait',
+                }}>
                 <Stack.Screen name="(tabs)"/>
+                <Stack.Screen name="(tv)"/>
                 <Stack.Screen name="login"/>
                 <Stack.Screen name="profiles"/>
                 <Stack.Screen name="modal" options={{presentation: 'modal'}}/>

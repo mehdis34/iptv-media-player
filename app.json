@@ -25,13 +25,35 @@
     },
     "android": {
       "package": "com.iptvmediaplayer.app",
+      "minSdkVersion": 26,
       "usesCleartextTraffic": true,
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/adaptive-icon.png",
         "backgroundColor": "#ffffff"
       },
       "edgeToEdgeEnabled": true,
-      "predictiveBackGestureEnabled": false
+      "predictiveBackGestureEnabled": false,
+      "tvBanner": "./assets/images/tv-banner.png",
+      "intentFilters": [
+        {
+          "action": "MAIN",
+          "category": [
+            "LEANBACK_LAUNCHER"
+          ]
+        }
+      ],
+      "manifest": {
+        "uses-feature": [
+          {
+            "name": "android.software.leanback",
+            "required": true
+          },
+          {
+            "name": "android.hardware.touchscreen",
+            "required": false
+          }
+        ]
+      }
     },
     "web": {
       "bundler": "metro",
@@ -40,8 +62,9 @@
     },
     "plugins": [
       "expo-router",
+      "./plugins/withAndroidMinSdk26Forced.js",
       [
-        "react-native-vlc-media-player",
+        "./plugins/withVlcMediaPlayerFixed.js",
         {
           "ios": {
             "includeVLCKit": false
