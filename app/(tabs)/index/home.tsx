@@ -269,52 +269,97 @@ export default function HomeScreen() {
         return new Map(seriesList.map((item) => [item.series_id, item]));
     }, [seriesList]);
 
+    const formatEpisodeLabel = useCallback((item: ResumeItem) => {
+        if (item.type !== 'series') return undefined;
+        const season = typeof item.season === 'number' ? item.season : null;
+        const title = item.episodeTitle ?? '';
+        const seMatch = title.match(/S(\d+)\D*E(\d+)/i);
+        if (seMatch) {
+            const s = String(seMatch[1]).padStart(2, '0');
+            const e = String(seMatch[2]).padStart(2, '0');
+            return `S${s}E${e}`;
+        }
+        const epMatch = title.match(/Épisode\s*(\d+)/i);
+        if (season !== null && epMatch) {
+            const s = String(season).padStart(2, '0');
+            const e = String(epMatch[1]).padStart(2, '0');
+            return `S${s}E${e}`;
+        }
+        if (season !== null) {
+            return `S${String(season).padStart(2, '0')}`;
+        }
+        return undefined;
+    }, []);
+
     const liveById = useMemo(() => {
         return new Map(liveStreams.map((item) => [item.stream_id, item]));
     }, [liveStreams]);
 
     const continueItems = useMemo(() => {
-        return resumeItems
-            .filter((item) => item.type !== 'tv' && !item.completed)
+        const inProgress = resumeItems.filter(
+            (item) => item.type !== 'tv' && !item.completed
+        );
+
+        const movieItems = inProgress
+            .filter((item) => item.type === 'movie')
             .sort((a, b) => b.updatedAt - a.updatedAt)
             .map((item) => {
-                if (item.type === 'movie') {
-                    const movie = vodById.get(item.id);
-                    const title = item.title ?? movie?.name;
-                    if (!title) return null;
-                    const image = item.image ?? movie?.cover ?? movie?.stream_icon;
-                    const progress = item.durationSec ? item.positionSec / item.durationSec : undefined;
-                    return {
-                        key: `resume-movie-${item.id}`,
-                        type: 'movie' as const,
-                        id: item.id,
-                        title,
-                        image,
-                        progress,
-                        extension: movie?.container_extension ?? 'mp4',
-                        resume: item,
-                    };
-                }
-                if (item.type === 'series' && item.seriesId) {
-                    const series = seriesById.get(item.seriesId);
-                    const title = item.title ?? series?.name;
-                    if (!title) return null;
-                    const image = item.image ?? series?.cover ?? series?.backdrop_path?.[0];
-                    const progress = item.durationSec ? item.positionSec / item.durationSec : undefined;
-                    return {
-                        key: `resume-series-${item.seriesId}`,
-                        type: 'series' as const,
-                        id: item.seriesId,
-                        title,
-                        image,
-                        progress,
-                        resume: item,
-                    };
-                }
-                return null;
+                const movie = vodById.get(item.id);
+                const title = item.title ?? movie?.name;
+                if (!title) return null;
+                const image = item.image ?? movie?.cover ?? movie?.stream_icon;
+                const progress = item.durationSec ? item.positionSec / item.durationSec : undefined;
+                return {
+                    key: `resume-movie-${item.id}`,
+                    type: 'movie' as const,
+                    id: item.id,
+                    title,
+                    image,
+                    progress,
+                    extension: movie?.container_extension ?? 'mp4',
+                    resume: item,
+                    subtitle: undefined,
+                };
             })
             .filter((item): item is NonNullable<typeof item> => !!item);
-    }, [resumeItems, seriesById, vodById]);
+
+        const seriesMap = new Map<number, ResumeItem>();
+        inProgress
+            .filter((item) => item.type === 'series' && item.seriesId)
+            .forEach((item) => {
+                const seriesId = item.seriesId!;
+                const current = seriesMap.get(seriesId);
+                if (!current || item.updatedAt > current.updatedAt) {
+                    seriesMap.set(seriesId, item);
+                }
+            });
+
+        const seriesItems = Array.from(seriesMap.values())
+            .sort((a, b) => b.updatedAt - a.updatedAt)
+            .map((item) => {
+                if (!item.seriesId) return null;
+                const series = seriesById.get(item.seriesId);
+                const title = series?.name ?? item.title;
+                if (!title) return null;
+                const image = series?.cover ?? series?.backdrop_path?.[0];
+                const progress = item.durationSec ? item.positionSec / item.durationSec : undefined;
+                return {
+                    key: `resume-series-${item.seriesId}-${item.id}`,
+                    type: 'series' as const,
+                    id: item.seriesId,
+                    title,
+                    image,
+                    progress,
+                    resume: item,
+                    subtitle: formatEpisodeLabel(item),
+                };
+            })
+            .filter((item): item is NonNullable<typeof item> => !!item);
+
+        return [...movieItems, ...seriesItems].sort(
+            (a, b) => b.resume.updatedAt - a.resume.updatedAt
+        );
+    }, [formatEpisodeLabel, resumeItems, seriesById, vodById]);
 
     const favoriteMedia = useMemo(() => {
         return favorites
@@ -645,6 +690,8 @@ export default function HomeScreen() {
                                     title={item.title}
                                     image={item.image}
                                     progress={item.progress}
+                                    showTitle
+                                    subtitle={item.subtitle}
                                     onPress={() => {
                                         if (item.type === 'movie') {
                                             const movie = vodById.get(item.id);

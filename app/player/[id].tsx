@@ -820,6 +820,7 @@ export default function PlayerScreen() {
             ext: episode.container_extension ?? 'mp4',
             seriesId: params.seriesId ?? '',
             season: season ? String(season) : undefined,
+            start: undefined,
         });
         setShowEpisodes(false);
     };
@@ -833,6 +834,7 @@ export default function PlayerScreen() {
             ext: episode.container_extension ?? 'mp4',
             seriesId: params.seriesId ?? '',
             season: seasonValue ? String(seasonValue) : undefined,
+            start: undefined,
         });
         setShowEpisodes(false);
     };

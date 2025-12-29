@@ -9,6 +9,8 @@ type MediaCardProps = {
   size?: 'poster' | 'compact' | 'grid';
   onPress?: () => void;
   progress?: number;
+  showTitle?: boolean;
+  subtitle?: string;
 };
 
 export default function MediaCard({
@@ -17,6 +19,8 @@ export default function MediaCard({
   size = 'poster',
   onPress,
   progress,
+  showTitle = false,
+  subtitle,
 }: MediaCardProps) {
   const safeImage = safeImageUri(image);
   const [hasError, setHasError] = useState(false);
@@ -61,6 +65,18 @@ export default function MediaCard({
           </View>
         ) : null}
       </Pressable>
+      {showTitle ? (
+        <View className="mt-2">
+          <Text className="font-bodySemi text-xs text-white" numberOfLines={1}>
+            {title}
+          </Text>
+          {subtitle ? (
+            <Text className="mt-1 font-body text-[11px] text-white/60" numberOfLines={1}>
+              {subtitle}
+            </Text>
+          ) : null}
+        </View>
+      ) : null}
     </View>
   );
 }

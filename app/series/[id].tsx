@@ -149,12 +149,16 @@ export default function SeriesDetailScreen() {
                 setResumeEpisode(null);
                 return;
             }
+            const latestNonCompleted = matches
+                .filter((item) => !item.completed)
+                .sort((a, b) => b.updatedAt - a.updatedAt)[0];
             const latest = matches.sort((a, b) => b.updatedAt - a.updatedAt)[0];
-            setResumeEntry(latest);
-            const seasonKey = latest.season ? String(latest.season) : null;
+            const activeResume = latestNonCompleted ?? latest ?? null;
+            setResumeEntry(activeResume);
+            const seasonKey = activeResume?.season ? String(activeResume.season) : null;
             const list = seasonKey ? episodesBySeason[seasonKey] : null;
             const found =
-                list?.find((episode) => String(episode.id) === String(latest.id)) ?? null;
+                list?.find((episode) => String(episode.id) === String(activeResume?.id)) ?? null;
             setResumeEpisode(found);
         });
     }, [episodesBySeason, seriesId]);
@@ -220,7 +224,34 @@ export default function SeriesDetailScreen() {
     const resumePlayable = resumeEpisode ?? null;
     const hasResume = !!resumeEntry && !resumeEntry.completed;
     const isCompleted = !!resumeEntry?.completed;
-    const playLabel = isCompleted ? 'Revoir' : hasResume ? 'Reprendre' : 'Lecture';
+    const resumeEpisodeLabel = useMemo(() => {
+        if (!hasResume) return '';
+        const seasonValue = resumeEntry?.season ?? null;
+        const titleValue = resumeEpisode?.title ?? resumeEpisode?.name ?? '';
+        const seMatch = titleValue.match(/S(\d+)\D*E(\d+)/i);
+        if (seMatch) {
+            const s = String(seMatch[1]).padStart(2, '0');
+            const e = String(seMatch[2]).padStart(2, '0');
+            return `S${s}E${e}`;
+        }
+        const epMatch = titleValue.match(/Épisode\s*(\d+)/i);
+        if (seasonValue !== null && epMatch) {
+            const s = String(seasonValue).padStart(2, '0');
+            const e = String(epMatch[1]).padStart(2, '0');
+            return `S${s}E${e}`;
+        }
+        if (seasonValue !== null && resumeEpisode?.episode_num) {
+            const s = String(seasonValue).padStart(2, '0');
+            const e = String(resumeEpisode.episode_num).padStart(2, '0');
+            return `S${s}E${e}`;
+        }
+        return '';
+    }, [hasResume, resumeEntry?.season, resumeEpisode?.episode_num, resumeEpisode?.name, resumeEpisode?.title]);
+    const playLabel = isCompleted
+        ? 'Revoir'
+        : hasResume
+            ? `Reprendre${resumeEpisodeLabel ? ` ${resumeEpisodeLabel}` : ''}`
+            : 'Lecture';
 
     const similarItems = useMemo(() => {
         const fallbackCategoryId = seriesList.find((item) => item.series_id === seriesId)?.category_id;
