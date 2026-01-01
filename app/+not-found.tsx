@@ -1,6 +1,6 @@
-import {Stack, useRouter, type Href} from 'expo-router';
+import {type Href, Stack, useRouter} from 'expo-router';
 import {LinearGradient} from 'expo-linear-gradient';
-import {Image, Pressable, Text, View} from 'react-native';
+import {Image, Platform, Pressable, Text, View} from 'react-native';
 
 import coverImage from '../assets/images/cinema-cover.webp';
 
@@ -26,7 +26,7 @@ export default function NotFoundScreen() {
             <View className="mt-8 w-full max-w-[260px]">
                 <Pressable
                   className="items-center rounded-full bg-ember px-4 py-3"
-                  onPress={() => router.replace('/home' as Href)}
+                  onPress={() => router.replace((Platform.isTV ? '/(tv)/home' : '/home') as Href)}
                 >
                   <Text className="font-bodySemi text-sm text-white">Revenir à l'accueil</Text>
                 </Pressable>

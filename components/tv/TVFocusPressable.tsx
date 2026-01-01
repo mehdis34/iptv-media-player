@@ -1,5 +1,11 @@
-import {Pressable, type PressableProps, type StyleProp, type ViewStyle} from 'react-native';
-import {ReactNode, useCallback, useState} from 'react';
+import {
+    Pressable,
+    type PressableProps,
+    type PressableStateCallbackType,
+    type StyleProp,
+    type ViewStyle,
+} from 'react-native';
+import {ReactNode, forwardRef, useCallback, useMemo, useState, type ElementRef} from 'react';
 
 type TVFocusPressableProps = PressableProps & {
     className?: string;
@@ -8,16 +14,22 @@ type TVFocusPressableProps = PressableProps & {
     children: ReactNode;
 };
 
-export default function TVFocusPressable({
-    className = '',
-    focusedClassName = '',
-    focusedStyle,
-    children,
-    onFocus,
-    onBlur,
-    style,
-    ...props
-}: TVFocusPressableProps) {
+type TVFocusPressableRef = ElementRef<typeof Pressable>;
+
+const TVFocusPressable = forwardRef<TVFocusPressableRef, TVFocusPressableProps>(
+    (
+        {
+            className = '',
+            focusedClassName = '',
+            focusedStyle,
+            children,
+            onFocus,
+            onBlur,
+            style,
+            ...props
+        },
+        ref
+    ) => {
     const [isFocused, setIsFocused] = useState(false);
 
     const handleFocus = useCallback(
@@ -36,16 +48,32 @@ export default function TVFocusPressable({
         [onBlur]
     );
 
-    return (
-        <Pressable
-            focusable
-            {...props}
-            onFocus={handleFocus}
-            onBlur={handleBlur}
-            className={`${className} ${isFocused ? focusedClassName : ''}`.trim()}
-            style={[style, isFocused ? focusedStyle : null]}
-        >
-            {children}
-        </Pressable>
-    );
-}
+    const resolvedStyle = useMemo(() => {
+        if (typeof style === 'function') {
+            return (state: PressableStateCallbackType) => {
+                const baseStyle = style(state);
+                return isFocused ? [baseStyle, focusedStyle] : baseStyle;
+            };
+        }
+        return isFocused ? [style, focusedStyle] : style;
+    }, [focusedStyle, isFocused, style]);
+
+        return (
+            <Pressable
+                ref={ref}
+                focusable
+                {...props}
+                onFocus={handleFocus}
+                onBlur={handleBlur}
+                className={`${className} ${isFocused ? focusedClassName : ''}`.trim()}
+                style={resolvedStyle}
+            >
+                {children}
+            </Pressable>
+        );
+    }
+);
+
+TVFocusPressable.displayName = 'TVFocusPressable';
+
+export default TVFocusPressable;

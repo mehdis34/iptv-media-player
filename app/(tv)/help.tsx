@@ -1,17 +1,17 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import {useState} from 'react';
 import {Modal, ScrollView, Text, View} from 'react-native';
-
-import TVScreen from '@/components/tv/TVScreen';
 import TVFocusPressable from '@/components/tv/TVFocusPressable';
 import {type HelpSection, helpSections} from '@/lib/help-content';
+import TVScreenScrollView from "@/components/tv/TVScreenScrollView";
 
 export default function TvHelpScreen() {
+    const topPadding = 96;
     const [activeSection, setActiveSection] = useState<HelpSection | null>(null);
 
     return (
-        <TVScreen>
-            <View className="w-full max-w-3xl self-center px-12 pt-2">
+        <TVScreenScrollView>
+            <View className="w-full max-w-3xl self-center px-12" style={{paddingTop: topPadding}}>
                 <Text className="font-display text-4xl text-white">Aide</Text>
                 <Text className="mt-2 font-body text-lg text-white/60">
                     Sélectionnez un thème pour afficher les explications.
@@ -41,7 +41,6 @@ export default function TvHelpScreen() {
                     </View>
                 </View>
             </View>
-
             <Modal
                 transparent
                 visible={!!activeSection}
@@ -97,6 +96,6 @@ export default function TvHelpScreen() {
                     </View>
                 </View>
             </Modal>
-        </TVScreen>
+        </TVScreenScrollView>
     );
 }

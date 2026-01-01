@@ -1,12 +1,13 @@
 import {useFocusEffect} from '@react-navigation/native';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import {useCallback, useMemo, useState} from 'react';
-import {ActivityIndicator, ScrollView, Text, View} from 'react-native';
+import {ActivityIndicator, Text, View} from 'react-native';
 
 import TVScreen from '@/components/tv/TVScreen';
 import {getCredentials} from '@/lib/storage';
 import {fetchAccountInfo} from '@/lib/xtream';
 import type {XtreamAccountInfo} from '@/lib/types';
+import TVScreenScrollView from '@/components/tv/TVScreenScrollView';
 
 const formatUnixDate = (value?: string | number) => {
     if (!value) return '—';
@@ -28,6 +29,7 @@ const formatValue = (value?: string | number) => {
 };
 
 export default function TvAccountInfoScreen() {
+    const topPadding = 96;
     const [info, setInfo] = useState<XtreamAccountInfo | null>(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState('');
@@ -83,7 +85,10 @@ export default function TvAccountInfoScreen() {
     if (loading) {
         return (
             <TVScreen>
-                <View className="flex-1 items-center justify-center pt-12">
+                <View
+                    className="flex-1 items-center justify-center"
+                    style={{paddingTop: topPadding, paddingBottom: topPadding}}
+                >
                     <ActivityIndicator size="large" color="#ffffff"/>
                 </View>
             </TVScreen>
@@ -93,7 +98,10 @@ export default function TvAccountInfoScreen() {
     if (error) {
         return (
             <TVScreen>
-                <View className="flex-1 items-center justify-center px-6">
+                <View
+                    className="flex-1 items-center justify-center px-6"
+                    style={{paddingTop: topPadding, paddingBottom: topPadding}}
+                >
                     <Text className="font-body text-ember">{error}</Text>
                 </View>
             </TVScreen>
@@ -101,69 +109,67 @@ export default function TvAccountInfoScreen() {
     }
 
     return (
-        <TVScreen>
-            <ScrollView
-                className="flex-1 w-full max-w-3xl self-center"
-                contentContainerStyle={{paddingBottom: 80}}
-                showsVerticalScrollIndicator={false}
-            >
-                <View className="px-12 pt-8">
-                    <Text className="mb-4 font-bodySemi text-xl text-white text-center">Informations du compte</Text>
-                    <AccountSection title="Profil actif" icon="person-circle-outline">
-                        <InfoRow label="Profil" value={profileName || '—'}/>
-                        <InfoRow label="Hôte" value={host || '—'}/>
-                        <InfoRow label="Identifiant" value={username || '—'}/>
-                    </AccountSection>
-                </View>
+        <TVScreenScrollView
+            className="flex-1 w-full max-w-3xl self-center"
+            contentContainerStyle={{paddingBottom: 80, paddingTop: topPadding}}
+            showsVerticalScrollIndicator={false}
+        >
+            <View className="px-12">
+                <Text className="mb-4 font-bodySemi text-xl text-white text-center">Informations du compte</Text>
+                <AccountSection title="Profil actif" icon="person-circle-outline">
+                    <InfoRow label="Profil" value={profileName || '—'}/>
+                    <InfoRow label="Hôte" value={host || '—'}/>
+                    <InfoRow label="Identifiant" value={username || '—'}/>
+                </AccountSection>
+            </View>
 
-                <View className="mt-6 px-12">
-                    <AccountSection title="Abonnement" icon="card-outline">
-                        <InfoRow label="Statut" value={status ?? '—'}/>
-                        <InfoRow label="Expiration" value={formatUnixDate(info?.user_info?.exp_date)}/>
-                        <InfoRow label="Essai" value={isTrial ? 'Oui' : 'Non'}/>
-                        <InfoRow label="Connexions actives" value={formatValue(info?.user_info?.active_cons)}/>
-                        <InfoRow label="Connexions max" value={formatValue(info?.user_info?.max_connections)}/>
-                    </AccountSection>
-                </View>
+            <View className="mt-6 px-12">
+                <AccountSection title="Abonnement" icon="card-outline">
+                    <InfoRow label="Statut" value={status ?? '—'}/>
+                    <InfoRow label="Expiration" value={formatUnixDate(info?.user_info?.exp_date)}/>
+                    <InfoRow label="Essai" value={isTrial ? 'Oui' : 'Non'}/>
+                    <InfoRow label="Connexions actives" value={formatValue(info?.user_info?.active_cons)}/>
+                    <InfoRow label="Connexions max" value={formatValue(info?.user_info?.max_connections)}/>
+                </AccountSection>
+            </View>
 
-                <View className="mt-6 px-12">
-                    <AccountSection title="Serveur" icon="server-outline">
-                        <InfoRow label="URL" value={formatValue(info?.server_info?.url)}/>
-                        <InfoRow label="Port" value={formatValue(info?.server_info?.port)}/>
-                        <InfoRow label="HTTPS" value={formatValue(info?.server_info?.https_port)}/>
-                        <InfoRow label="Protocole" value={formatValue(info?.server_info?.server_protocol)}/>
-                        <InfoRow label="Fuseau horaire" value={formatValue(info?.server_info?.timezone)}/>
-                        <InfoRow label="Heure serveur" value={formatValue(info?.server_info?.time_now)}/>
-                        <InfoRow label="Créé le" value={formatUnixDate(info?.user_info?.created_at)}/>
-                    </AccountSection>
-                </View>
+            <View className="mt-6 px-12">
+                <AccountSection title="Serveur" icon="server-outline">
+                    <InfoRow label="URL" value={formatValue(info?.server_info?.url)}/>
+                    <InfoRow label="Port" value={formatValue(info?.server_info?.port)}/>
+                    <InfoRow label="HTTPS" value={formatValue(info?.server_info?.https_port)}/>
+                    <InfoRow label="Protocole" value={formatValue(info?.server_info?.server_protocol)}/>
+                    <InfoRow label="Fuseau horaire" value={formatValue(info?.server_info?.timezone)}/>
+                    <InfoRow label="Heure serveur" value={formatValue(info?.server_info?.time_now)}/>
+                    <InfoRow label="Créé le" value={formatUnixDate(info?.user_info?.created_at)}/>
+                </AccountSection>
+            </View>
 
-                <View className="mt-6 px-12">
-                    <AccountSection title="Formats autorisés" icon="options-outline">
-                        {allowedFormats ? (
-                            <View className="mt-2 flex-row flex-wrap gap-2">
-                                {allowedFormats
-                                    .split(',')
-                                    .map((format) => format.trim())
-                                    .filter(Boolean)
-                                    .map((format) => (
-                                        <View
-                                            key={format}
-                                            className="rounded-full border border-white/10 bg-white/10 px-3 py-1.5"
-                                        >
-                                            <Text className="font-bodySemi text-xs text-white">
-                                                {format.toUpperCase()}
-                                            </Text>
-                                        </View>
-                                    ))}
-                            </View>
-                        ) : (
-                            <Text className="mt-1 font-body text-base text-white">—</Text>
-                        )}
-                    </AccountSection>
-                </View>
-            </ScrollView>
-        </TVScreen>
+            <View className="mt-6 px-12">
+                <AccountSection title="Formats autorisés" icon="options-outline">
+                    {allowedFormats ? (
+                        <View className="mt-2 flex-row flex-wrap gap-2">
+                            {allowedFormats
+                                .split(',')
+                                .map((format) => format.trim())
+                                .filter(Boolean)
+                                .map((format) => (
+                                    <View
+                                        key={format}
+                                        className="rounded-full border border-white/10 bg-white/10 px-3 py-1.5"
+                                    >
+                                        <Text className="font-bodySemi text-xs text-white">
+                                            {format.toUpperCase()}
+                                        </Text>
+                                    </View>
+                                ))}
+                        </View>
+                    ) : (
+                        <Text className="mt-1 font-body text-base text-white">—</Text>
+                    )}
+                </AccountSection>
+            </View>
+        </TVScreenScrollView>
     );
 }
 

@@ -1,5 +1,5 @@
 import {StatusBar} from 'expo-status-bar';
-import {useLocalSearchParams, useRouter} from 'expo-router';
+import {Href, useLocalSearchParams, useRouter} from 'expo-router';
 import {useEffect, useMemo, useState} from 'react';
 import {Image, KeyboardAvoidingView, Platform, Pressable, ScrollView, Text, TextInput, View,} from 'react-native';
 import {LinearGradient} from 'expo-linear-gradient';
@@ -13,16 +13,14 @@ import coverImage from '../assets/images/cinema-cover.webp';
 import {saveCredentials} from '@/lib/storage';
 import {validateCredentials} from '@/lib/xtream';
 import {type LoginFormValues, loginSchema} from '@/schemas/login.schema';
+import {buildAvatarUrl} from "@/lib/avatar";
+import TVFocusPressable from '@/components/tv/TVFocusPressable';
+import TVScreenScrollView from '@/components/tv/TVScreenScrollView';
 
 const AVATAR_SEEDS = ['atlas', 'ember', 'nova', 'luna', 'drift', 'hex'];
 const PROFILE_NAMES = ['Mehdi', 'Salon', 'Guest', 'Kids', 'Cinema', 'Voyage'];
 const COVER_SOURCE = coverImage;
 const FALLBACK_COLOR = '#0b0b0f';
-
-function buildAvatarUrl(seed: string) {
-    const encoded = encodeURIComponent(seed.trim());
-    return `https://api.dicebear.com/7.x/avataaars/png?seed=${encoded}&backgroundColor=0b0b0f`;
-}
 
 export default function LoginScreen() {
     const router = useRouter();
@@ -109,7 +107,7 @@ export default function LoginScreen() {
             };
             await validateCredentials(creds);
             await saveCredentials(creds);
-            router.replace((next as any) ?? '/(tabs)');
+            router.replace(((next as any) ?? Platform.isTV ? '/(tv)' : '/(tabs)') as Href);
         } catch (err) {
             setError('root', {
                 message: err instanceof Error ? err.message : 'Connexion impossible.',
@@ -118,6 +116,285 @@ export default function LoginScreen() {
             setLoading(false);
         }
     });
+
+    if (Platform.isTV) {
+        const focusBaseStyle = {borderWidth: 2};
+        const focusRingStyle = {
+            transform: [{scale: 1.04}],
+            borderWidth: 2,
+            borderColor: '#ffffff',
+            shadowColor: '#ffffff',
+            shadowOpacity: 0.35,
+            shadowRadius: 8,
+            shadowOffset: {width: 0, height: 0},
+        };
+        const focusFillStyle = {
+            transform: [{scale: 1.03}],
+            borderWidth: 2,
+            borderColor: '#ffffff',
+            shadowColor: '#ffffff',
+            shadowOpacity: 0.3,
+            shadowRadius: 8,
+            shadowOffset: {width: 0, height: 0},
+        };
+        const eyeBaseStyle = {borderWidth: 0};
+        const eyeFocusStyle = {...focusFillStyle, borderRadius: 9999};
+
+        return (
+            <View className="flex-1 bg-ink">
+                <StatusBar style="light"/>
+
+                <Image
+                    source={COVER_SOURCE}
+                    className="absolute inset-0 h-full w-full opacity-20"
+                    resizeMode="cover"
+                />
+                <LinearGradient colors={gradientColors} locations={[0, 0.55, 1]} className="absolute inset-0"/>
+                <LinearGradient
+                    colors={['rgba(0,0,0,0.0)', 'rgba(0,0,0,0.88)']}
+                    locations={[0.25, 1]}
+                    className="absolute inset-0"
+                />
+
+                <TVScreenScrollView>
+                    <View className="flex-1 pt-12">
+                        <Text className="mb-6 font-bodySemi text-2xl text-white text-center">
+                            Ajouter un profil
+                        </Text>
+                        <View className="w-full max-w-4xl self-center px-12">
+                            <View className="mb-6">
+                                <Text className="mb-3 font-body text-base text-[#9ca3af]">
+                                    Nom du profil
+                                </Text>
+                                <View className="h-14 flex-row items-center rounded-2xl bg-white/10 px-4">
+                                    <Controller
+                                        control={control}
+                                        name="profileName"
+                                        render={({field: {onChange, value, onBlur}}) => (
+                                            <TextInput
+                                                className="flex-1 p-0 font-body text-base text-white"
+                                                placeholder="Ex : Salon, Mehdi, Enfants..."
+                                                placeholderTextColor="#6b7280"
+                                                autoCapitalize="words"
+                                                textAlignVertical="center"
+                                                value={value}
+                                                onChangeText={onChange}
+                                                onBlur={onBlur}
+                                                style={{
+                                                    height: '100%',
+                                                    lineHeight: 22,
+                                                    paddingVertical: 0,
+                                                    paddingTop: 0,
+                                                    paddingBottom: 0,
+                                                }}
+                                            />
+                                        )}
+                                    />
+                                </View>
+                                {errors.profileName?.message ? (
+                                    <Text className="mt-2 font-body text-sm text-[#ff4d5a]">
+                                        {errors.profileName.message}
+                                    </Text>
+                                ) : null}
+                            </View>
+
+                            <View className="mb-8">
+                                <Text className="mb-3 font-body text-base text-[#9ca3af]">
+                                    Choisissez un avatar
+                                </Text>
+                                <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+                                    <View className="flex-row gap-5 px-2 py-2">
+                                        {AVATAR_SEEDS.map((seed) => {
+                                            const isSelected = seed === selectedSeed;
+                                            return (
+                                                <TVFocusPressable
+                                                    key={seed}
+                                                    onPress={() =>
+                                                        setValue('avatarSeed', seed, {shouldValidate: true})
+                                                    }
+                                                    className={`h-24 w-24 overflow-hidden rounded-3xl border-2 ${
+                                                        isSelected ? 'border-ember' : 'border-white/10'
+                                                    }`}
+                                                    style={focusBaseStyle}
+                                                    focusedStyle={focusRingStyle}
+                                                >
+                                                    <Image
+                                                        source={{uri: buildAvatarUrl(seed)}}
+                                                        className="h-full w-full"
+                                                    />
+                                                </TVFocusPressable>
+                                            );
+                                        })}
+                                    </View>
+                                </ScrollView>
+                                {errors.avatarSeed?.message ? (
+                                    <Text className="mt-2 font-body text-sm text-[#ff4d5a]">
+                                        {errors.avatarSeed.message}
+                                    </Text>
+                                ) : null}
+                            </View>
+
+                            <View className="mb-5">
+                                <Text className="mb-3 font-body text-base text-[#9ca3af]">
+                                    URL du serveur Xtream
+                                </Text>
+                                <View className="h-14 flex-row items-center rounded-2xl bg-white/10 px-4">
+                                    <Controller
+                                        control={control}
+                                        name="host"
+                                        render={({field: {onChange, value, onBlur}}) => (
+                                            <TextInput
+                                                className="flex-1 p-0 font-body text-base text-white"
+                                                placeholder="https://example.com:8080"
+                                                placeholderTextColor="#6b7280"
+                                                autoCapitalize="none"
+                                                autoCorrect={false}
+                                                textAlignVertical="center"
+                                                value={value}
+                                                onChangeText={onChange}
+                                                onBlur={onBlur}
+                                                style={{
+                                                    height: '100%',
+                                                    lineHeight: 22,
+                                                    paddingVertical: 0,
+                                                    paddingTop: 0,
+                                                    paddingBottom: 0,
+                                                }}
+                                            />
+                                        )}
+                                    />
+                                </View>
+                                {errors.host?.message ? (
+                                    <Text className="mt-2 font-body text-sm text-[#ff4d5a]">
+                                        {errors.host.message}
+                                    </Text>
+                                ) : null}
+                            </View>
+
+                            <View className="mb-5">
+                                <Text className="mb-3 font-body text-base text-[#9ca3af]">
+                                    Identifiant
+                                </Text>
+                                <View className="h-14 flex-row items-center rounded-2xl bg-white/10 px-4">
+                                    <Controller
+                                        control={control}
+                                        name="username"
+                                        render={({field: {onChange, value, onBlur}}) => (
+                                            <TextInput
+                                                className="flex-1 p-0 font-body text-base text-white"
+                                                placeholder="Identifiant"
+                                                placeholderTextColor="#6b7280"
+                                                autoCapitalize="none"
+                                                autoCorrect={false}
+                                                textAlignVertical="center"
+                                                value={value}
+                                                onChangeText={onChange}
+                                                onBlur={onBlur}
+                                                style={{
+                                                    height: '100%',
+                                                    lineHeight: 22,
+                                                    paddingVertical: 0,
+                                                    paddingTop: 0,
+                                                    paddingBottom: 0,
+                                                }}
+                                            />
+                                        )}
+                                    />
+                                </View>
+                                {errors.username?.message ? (
+                                    <Text className="mt-2 font-body text-sm text-[#ff4d5a]">
+                                        {errors.username.message}
+                                    </Text>
+                                ) : null}
+                            </View>
+
+                            <View className="mb-8">
+                                <Text className="mb-3 font-body text-base text-[#9ca3af]">
+                                    Mot de passe
+                                </Text>
+                                <View className="h-14 flex-row items-center rounded-2xl bg-white/10 px-4">
+                                    <Controller
+                                        control={control}
+                                        name="password"
+                                        render={({field: {onChange, value, onBlur}}) => (
+                                            <TextInput
+                                                className="flex-1 p-0 font-body text-base text-white"
+                                                placeholder="Mot de passe"
+                                                placeholderTextColor="#6b7280"
+                                                secureTextEntry={!showPassword}
+                                                textAlignVertical="center"
+                                                value={value}
+                                                onChangeText={onChange}
+                                                onBlur={onBlur}
+                                                style={{
+                                                    height: '100%',
+                                                    lineHeight: 22,
+                                                    paddingVertical: 0,
+                                                    paddingTop: 0,
+                                                    paddingBottom: 0,
+                                                }}
+                                            />
+                                        )}
+                                    />
+                                    <TVFocusPressable
+                                        onPress={() => setShowPassword((prev) => !prev)}
+                                        className="h-12 w-12 items-center justify-center rounded-full"
+                                        style={eyeBaseStyle}
+                                        focusedStyle={eyeFocusStyle}
+                                    >
+                                        <FontAwesome6
+                                            name={showPassword ? 'eye-slash' : 'eye'}
+                                            size={18}
+                                            color="#ffffff"
+                                        />
+                                    </TVFocusPressable>
+                                </View>
+                                {errors.password?.message ? (
+                                    <Text className="mt-2 font-body text-sm text-[#ff4d5a]">
+                                        {errors.password.message}
+                                    </Text>
+                                ) : null}
+                            </View>
+
+                            <View className="gap-4 pb-10">
+                                <TVFocusPressable
+                                    onPress={onSubmit}
+                                    className="rounded-2xl bg-white/10 py-4"
+                                    style={focusBaseStyle}
+                                    focusedStyle={{
+                                        transform: [{scale: 1.02}],
+                                        backgroundColor: '#ed0341',
+                                    }}
+                                    disabled={loading}
+                                >
+                                    <Text className="text-center font-bodySemi text-base text-white">
+                                        {loading ? 'Connexion...' : 'Se connecter'}
+                                    </Text>
+                                </TVFocusPressable>
+
+                                <TVFocusPressable
+                                    onPress={fillDemo}
+                                    className="rounded-2xl border border-white/10 bg-white/5 py-4"
+                                    style={focusBaseStyle}
+                                    focusedStyle={focusFillStyle}
+                                >
+                                    <Text className="text-center font-body text-sm text-white">
+                                        Remplir avec un profil aléatoire
+                                    </Text>
+                                </TVFocusPressable>
+
+                                {errors.root?.message ? (
+                                    <Text className="text-center font-body text-sm text-ember">
+                                        {errors.root.message}
+                                    </Text>
+                                ) : null}
+                            </View>
+                        </View>
+                    </View>
+                </TVScreenScrollView>
+            </View>
+        );
+    }
 
     return (
         <KeyboardAvoidingView

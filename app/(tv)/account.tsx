@@ -3,24 +3,24 @@ import {useFocusEffect} from '@react-navigation/native';
 import {Href, useRouter} from 'expo-router';
 import {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {ActivityIndicator, Alert, FlatList, Image, Text, View,} from 'react-native';
-
-import TVScreen from '@/components/tv/TVScreen';
 import TVFocusPressable from '@/components/tv/TVFocusPressable';
 import {clearCredentials, getActiveProfileId, getProfiles, setActiveProfileId,} from '@/lib/storage';
 import {fetchAccountInfo} from '@/lib/xtream';
 import {clearCatalogCacheEntries} from '@/lib/catalog-cache';
 import {clearEpgCache} from '@/lib/epg-cache';
 import type {XtreamProfile} from '@/lib/types';
+import TVScreenScrollView from "@/components/tv/TVScreenScrollView";
 
 export default function TvAccountScreen() {
     const router = useRouter();
+    const topPadding = 96;
     const [profiles, setProfiles] = useState<XtreamProfile[]>([]);
     const [activeId, setActiveId] = useState<string | null>(null);
     const [accountExpiry, setAccountExpiry] = useState<string>('');
     const [isRefreshingCatalog, setIsRefreshingCatalog] = useState(false);
     const pendingSwitchRef = useRef<string | null>(null);
     const focusRingClass = '';
-    const focusBaseStyle = {borderWidth: 2, borderColor: 'transparent'};
+    const focusBaseStyle = {borderWidth: 2};
     const focusRingStyle = {
         transform: [{scale: 1.04}],
         borderWidth: 2,
@@ -108,7 +108,10 @@ export default function TvAccountScreen() {
     }, [activeId, router]);
 
     const handleSwitch = async (profileId: string) => {
-        if (profileId === activeId) return;
+        if (profileId === activeId) {
+            router.replace('/(tv)/movies');
+            return
+        }
         pendingSwitchRef.current = profileId;
         await setActiveProfileId(profileId);
         setActiveId(profileId);
@@ -172,8 +175,8 @@ export default function TvAccountScreen() {
     );
 
     return (
-        <TVScreen>
-            <View className="w-full max-w-3xl self-center">
+        <TVScreenScrollView>
+            <View className="w-full max-w-3xl self-center" style={{paddingTop: topPadding}}>
                 <View className="px-12">
                     <Text className="mb-4 font-bodySemi text-xl text-white">Profils</Text>
                     <FlatList
@@ -209,13 +212,17 @@ export default function TvAccountScreen() {
                                 );
                             }
                             const profile = item as XtreamProfile;
+                            const isActive = profile.id === activeId;
                             return (
                                 <View className="items-center">
                                     <TVFocusPressable
                                         onPress={() => handleSwitch(profile.id)}
                                         className="h-36 w-36 rounded-full flex items-center justify-center bg-ash"
                                         focusedClassName={focusRingClass}
-                                        style={focusBaseStyle}
+                                        style={[
+                                            focusBaseStyle,
+                                            {borderColor: isActive ? '#ed0341' : 'transparent'},
+                                        ]}
                                         focusedStyle={focusRingStyle}
                                     >
                                         <Image
@@ -296,6 +303,6 @@ export default function TvAccountScreen() {
                     </View>
                 </View>
             </View>
-        </TVScreen>
+        </TVScreenScrollView>
     );
 }

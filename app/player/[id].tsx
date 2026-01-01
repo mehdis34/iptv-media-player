@@ -4,15 +4,56 @@ import {StatusBar} from 'expo-status-bar';
 import {useLocalSearchParams, useRouter} from 'expo-router';
 import {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {BlurView} from 'expo-blur';
-import {ActivityIndicator, Animated, FlatList, Image, Modal, Pressable, ScrollView, SectionList, StyleSheet, Text, useWindowDimensions, View} from 'react-native';
+import {
+    ActivityIndicator,
+    Animated,
+    FlatList,
+    Image,
+    Modal,
+    Pressable,
+    ScrollView,
+    SectionList,
+    StyleSheet,
+    Text,
+    useWindowDimensions,
+    View
+} from 'react-native';
 import Slider from '@react-native-community/slider';
 
-import {getCatalogCache, getCredentials, getFavoriteItems, getResumeItem, toggleFavoriteItem, upsertResumeItem} from '@/lib/storage';
-import {buildSeriesEpisodeUrl, buildStreamUrl, buildVodUrl, fetchLiveCategories, fetchLiveStreams, fetchSeriesInfo, fetchXmltvEpg} from '@/lib/xtream';
+import {
+    getCatalogCache,
+    getCredentials,
+    getFavoriteItems,
+    getResumeItem,
+    toggleFavoriteItem,
+    upsertResumeItem
+} from '@/lib/storage';
+import {
+    buildSeriesEpisodeUrl,
+    buildStreamUrl,
+    buildVodUrl,
+    fetchLiveCategories,
+    fetchLiveStreams,
+    fetchSeriesInfo,
+    fetchXmltvEpg
+} from '@/lib/xtream';
 import {VLCPlayer} from 'react-native-vlc-media-player';
-import type {FavoriteItem, ResumeItem, XtreamCategory, XtreamEpisode, XtreamEpgListing, XtreamSeriesInfo, XtreamStream} from '@/lib/types';
+import type {
+    FavoriteItem,
+    ResumeItem,
+    XtreamCategory,
+    XtreamEpgListing,
+    XtreamEpisode,
+    XtreamSeriesInfo,
+    XtreamStream
+} from '@/lib/types';
 import {safeImageUri} from '@/lib/media';
-import {decodeEpgText, normalizeXmltvName, parseXmltvDate, resolveXmltvChannelId as resolveXmltvChannelIdFromStream} from '@/lib/epg.utils';
+import {
+    decodeEpgText,
+    normalizeXmltvName,
+    parseXmltvDate,
+    resolveXmltvChannelId as resolveXmltvChannelIdFromStream
+} from '@/lib/epg.utils';
 import {formatDayLabel} from '@/lib/date.utils';
 import TvRowContent from '@/components/TvRowContent';
 
@@ -207,7 +248,7 @@ export default function PlayerScreen() {
         if (activeSidePanel !== 'zap') return;
         if (!zapStreams.length) return;
         scrollZapToActive();
-    }, [activeSidePanel, scrollZapToActive, zapStreams, zapCategoryId]);
+    }, [activeSidePanel, scrollZapToActive, zapCategoryId]);
 
     useEffect(() => {
         let mounted = true;

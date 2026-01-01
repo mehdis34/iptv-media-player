@@ -1,5 +1,4 @@
 import {type Href, useRouter} from 'expo-router';
-import {useFocusEffect} from '@react-navigation/native';
 import {type ReactNode, useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {
     ActivityIndicator,
@@ -20,12 +19,17 @@ import FeaturedCard from '@/components/FeaturedCard';
 import MediaCard from '@/components/MediaCard';
 import MediaGrid from '@/components/MediaGrid';
 import SectionHeader from '@/components/SectionHeader';
-import {useFavoritesAndResumesState} from '@/lib/catalog.hooks';
-import {getDominantColor, safeImageUri} from '@/lib/media';
-import {applyFavoritesAndResumes, CATALOG_CACHE_TTL_MS, shouldReloadForProfile} from '@/lib/catalog.utils';
-import {getCatalogCache, getCredentials, setCatalogCache, toggleFavoriteItem} from '@/lib/storage';
-import {fetchVodCategories, fetchVodStreams} from '@/lib/xtream';
-import type {ResumeItem, XtreamCategory, XtreamVod} from '@/lib/types';
+import {getDominantColor} from '@/lib/media';
+import {toggleFavoriteItem} from '@/lib/storage';
+import {useMoviesCatalog} from '@/lib/movies.hooks';
+import {
+    buildMovieCategoryRows,
+    buildMovieHero,
+    buildResumeMovieMap,
+    getSelectedCategoryItems,
+    getResumePlaybackState,
+} from '@/lib/movies.utils';
+import type {XtreamCategory, XtreamVod} from '@/lib/types';
 
 type CategoryParams = {
     type: 'movies';
@@ -44,19 +48,23 @@ export default function MoviesScreen() {
     const {height} = useWindowDimensions();
     const router = useRouter();
     const headerHeight = 132;
-    const [vodCategories, setVodCategories] = useState<XtreamCategory[]>([]);
-    const [vodStreams, setVodStreams] = useState<XtreamVod[]>([]);
-    const {favorites, setFavorites, resumeItems, setResumeItems} = useFavoritesAndResumesState();
-    const [loading, setLoading] = useState(true);
-    const [error, setError] = useState('');
+    const {
+        vodCategories,
+        vodStreams,
+        favorites,
+        setFavorites,
+        resumeItems,
+        loading,
+        error,
+        showInitialLoader,
+        initialLoadingMessage,
+    } = useMoviesCatalog({
+        onMissingCredentials: () => router.replace('/login'),
+    });
     const [heroTone, setHeroTone] = useState('#000000');
-    const [showInitialLoader, setShowInitialLoader] = useState(false);
-    const [initialLoadingMessage, setInitialLoadingMessage] = useState('Chargement en cours...');
     const [isHeaderBlurred, setIsHeaderBlurred] = useState(false);
     const [showMovieCategories, setShowMovieCategories] = useState(false);
     const [selectedCategoryId, setSelectedCategoryId] = useState<string | null>(null);
-    const lastProfileKey = useRef<string | null>(null);
-    const hasLoadedOnce = useRef(false);
     const categoryListRef = useRef<FlatList<XtreamCategory> | null>(null);
     const categoryListScrollRef = useRef<FlatList<MovieRow> | null>(null);
     const categoryGridScrollRef = useRef<FlatList<XtreamVod> | null>(null);
@@ -66,52 +74,20 @@ export default function MoviesScreen() {
 
     const orderedVodStreams = useMemo(() => vodStreams, [vodStreams]);
 
-    const resumeMovieMap = useMemo(() => {
-        const map = new Map<number, ResumeItem>();
-        resumeItems
-            .filter((item) => item.type === 'movie')
-            .forEach((item) => map.set(item.id, item));
-        return map;
-    }, [resumeItems]);
+    const resumeMovieMap = useMemo(() => buildResumeMovieMap(resumeItems), [resumeItems]);
 
     const selectedCategoryItems = useMemo(() => {
-        if (!selectedCategoryId) return [];
-        return orderedVodStreams.filter((stream) => stream.category_id === selectedCategoryId);
+        return getSelectedCategoryItems(orderedVodStreams, selectedCategoryId);
     }, [orderedVodStreams, selectedCategoryId]);
 
-    const categoryHero = useMemo(() => {
-        const first = selectedCategoryItems[0];
-        if (!first) return null;
-        return {
-            id: first.stream_id,
-            type: 'movie' as const,
-            extension: first.container_extension,
-            title: first.name,
-            image: safeImageUri(first.cover ?? first.stream_icon),
-            badge: 'Film',
-        };
-    }, [selectedCategoryItems]);
-
-    const defaultHero = useMemo(() => {
-        const firstCategoryId = vodCategories[0]?.category_id;
-        const firstFromCategory = firstCategoryId
-            ? orderedVodStreams.find((stream) => stream.category_id === firstCategoryId)
-            : null;
-        const first = firstFromCategory ?? orderedVodStreams[0];
-        if (!first) return null;
-        return {
-            id: first.stream_id,
-            type: 'movie' as const,
-            extension: first.container_extension,
-            title: first.name,
-            image: safeImageUri(first.cover ?? first.stream_icon),
-            badge: 'Film',
-        };
-    }, [orderedVodStreams, vodCategories]);
-
     const hero = useMemo(
-        () => (selectedCategoryId ? categoryHero : defaultHero),
-        [categoryHero, defaultHero, selectedCategoryId]
+        () =>
+            buildMovieHero({
+                categories: vodCategories,
+                streams: orderedVodStreams,
+                selectedCategoryId,
+            }),
+        [orderedVodStreams, selectedCategoryId, vodCategories]
     );
     const selectedCategory = useMemo(
         () => vodCategories.find((category) => category.category_id === selectedCategoryId),
@@ -169,102 +145,22 @@ export default function MoviesScreen() {
         return () => cancelAnimationFrame(handle);
     }, [selectedCategoryId]);
 
-    const loadData = useCallback(() => {
-        let mounted = true;
-
-        async function load() {
-            try {
-                if (
-                    !(await shouldReloadForProfile({
-                        lastProfileKey,
-                        hasLoadedOnce,
-                    }))
-                ) {
-                    return;
-                }
-                setLoading(true);
-                setShowInitialLoader(false);
-                setError('');
-                const creds = await getCredentials();
-                if (!creds) {
-                    router.replace('/login');
-                    return;
-                }
-                const cache = await getCatalogCache(['vodCategories', 'vodStreams']);
-                const now = Date.now();
-                const cacheFresh =
-                    cache.updatedAt.vodCategories &&
-                    cache.updatedAt.vodStreams &&
-                    now - cache.updatedAt.vodCategories < CATALOG_CACHE_TTL_MS &&
-                    now - cache.updatedAt.vodStreams < CATALOG_CACHE_TTL_MS;
-
-                if (cache.data.vodCategories) setVodCategories(cache.data.vodCategories);
-                if (cache.data.vodStreams) setVodStreams(cache.data.vodStreams);
-
-                const applied = await applyFavoritesAndResumes({
-                    setFavorites,
-                    setResumes: setResumeItems,
-                    isMounted: () => mounted,
-                });
-                if (!applied) return;
-
-                if (cacheFresh) {
-                    hasLoadedOnce.current = true;
-                    setLoading(false);
-                    return;
-                }
-
-                setShowInitialLoader(true);
-                setInitialLoadingMessage('Chargement du catalogue...');
-
-                const [vodCats, vod] = await Promise.all([
-                    fetchVodCategories(creds),
-                    fetchVodStreams(creds),
-                ]);
-                if (!mounted) return;
-                setVodCategories(vodCats);
-                setVodStreams(vod);
-                await setCatalogCache({
-                    vodCategories: vodCats,
-                    vodStreams: vod,
-                });
-                hasLoadedOnce.current = true;
-            } catch (err) {
-                if (!mounted) return;
-                setError(err instanceof Error ? err.message : 'Chargement impossible.');
-            } finally {
-                if (mounted) {
-                    setLoading(false);
-                    setShowInitialLoader(false);
-                }
-            }
-        }
-
-        load();
-        return () => {
-            mounted = false;
-        };
-    }, [router]);
-
-    useFocusEffect(loadData);
-
     const handleScroll = (event: any) => {
         const offsetY = event.nativeEvent.contentOffset.y;
         const next = offsetY > 12;
         setIsHeaderBlurred((prev) => (prev !== next ? next : prev));
     };
 
-    const vodRows = useMemo(() => {
-        const categories = selectedCategoryId
-            ? vodCategories.filter((category) => category.category_id === selectedCategoryId)
-            : vodCategories;
-        return categories.map((category) => ({
-            category,
-            items: orderedVodStreams
-                .filter((stream) => stream.category_id === category.category_id)
-                .slice(0, 12),
-        }));
-    }, [orderedVodStreams, selectedCategoryId, vodCategories]);
+    const vodRows = useMemo(
+        () =>
+            buildMovieCategoryRows({
+                categories: vodCategories,
+                streams: orderedVodStreams,
+                selectedCategoryId,
+                limit: 12,
+            }),
+        [orderedVodStreams, selectedCategoryId, vodCategories]
+    );
 
     const movieRows = useMemo<MovieRow[]>(() => {
         if (selectedCategoryId) {
@@ -294,15 +190,7 @@ export default function MoviesScreen() {
     const renderHeader = useCallback(() => {
         if (!hero) return <View className="px-6 pb-6"/>;
         const resume = resumeMovieMap.get(hero.id);
-        const playLabel = !resume
-            ? 'Lecture'
-            : resume.completed
-                ? 'Déjà vu'
-                : resume.positionSec > 30
-                    ? 'Reprendre'
-                    : 'Lecture';
-        const progress =
-            resume && resume.durationSec ? resume.positionSec / resume.durationSec : undefined;
+        const {label: playLabel, progress} = getResumePlaybackState(resume);
         const isFavorite = favorites.some((fav) => fav.type === 'movie' && fav.id === hero.id);
         return (
             <View className="px-6 pb-6">
@@ -387,15 +275,7 @@ export default function MoviesScreen() {
     const renderCategoryHeader = useCallback(() => {
         const first = selectedCategoryItems[0];
         const resume = first ? resumeMovieMap.get(first.stream_id) : undefined;
-        const playLabel = !resume
-            ? 'Lecture'
-            : resume.completed
-                ? 'Déjà vu'
-                : resume.positionSec > 30
-                    ? 'Reprendre'
-                    : 'Lecture';
-        const progress =
-            resume && resume.durationSec ? resume.positionSec / resume.durationSec : undefined;
+        const {label: playLabel, progress} = getResumePlaybackState(resume);
         const isFavorite = first
             ? favorites.some((fav) => fav.type === 'movie' && fav.id === first.stream_id)
             : false;

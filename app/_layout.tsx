@@ -8,13 +8,14 @@ import 'react-native-reanimated';
 import './global.css'
 import '@/lib/nativewind';
 import {Poppins_400Regular, Poppins_600SemiBold} from '@expo-google-fonts/poppins';
-import {Platform} from "react-native";
+import {LogBox, Platform} from 'react-native';
 
 export {
     ErrorBoundary,
 } from 'expo-router';
 
 SplashScreen.preventAutoHideAsync().then();
+LogBox.ignoreLogs(['SafeAreaView has been deprecated']);
 const originalWarn = console.warn;
 console.warn = (...args) => {
     if (typeof args[0] === 'string' && args[0].includes('SafeAreaView has been deprecated')) {

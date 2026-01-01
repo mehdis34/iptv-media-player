@@ -4,12 +4,11 @@ import {useCallback, useEffect, useRef, useState} from 'react';
 import {ActivityIndicator, Alert, Image, ScrollView, Text, TextInput, View} from 'react-native';
 import {Controller, useForm} from 'react-hook-form';
 import {zodResolver} from '@hookform/resolvers/zod';
-
-import TVScreen from '@/components/tv/TVScreen';
 import TVFocusPressable from '@/components/tv/TVFocusPressable';
 import {getActiveProfileId, getProfiles, removeProfile, updateProfile} from '@/lib/storage';
 import type {XtreamProfile} from '@/lib/types';
 import {type EditProfileFormValues, editProfileSchema} from '@/schemas/edit-profile.schema';
+import TVScreenScrollView from "@/components/tv/TVScreenScrollView";
 
 const AVATAR_SEEDS = ['atlas', 'ember', 'nova', 'luna', 'drift', 'hex'];
 
@@ -27,13 +26,14 @@ function getAvatarSeedFromUrl(url?: string) {
 
 export default function TvProfileEditScreen() {
     const router = useRouter();
+    const topPadding = 96;
     const [activeProfile, setActiveProfile] = useState<XtreamProfile | null>(null);
     const [loading, setLoading] = useState(true);
     const [showPassword, setShowPassword] = useState(false);
     const [isDeleting, setIsDeleting] = useState(false);
     const avatarScrollRef = useRef<ScrollView>(null);
 
-    const focusBaseStyle = {borderWidth: 2, borderColor: 'transparent'};
+    const focusBaseStyle = {borderWidth: 2};
     const focusRingStyle = {
         transform: [{scale: 1.04}],
         borderWidth: 2,
@@ -136,10 +136,10 @@ export default function TvProfileEditScreen() {
                         const remaining = await getProfiles();
                         setIsDeleting(false);
                         if (!remaining.length) {
-                            router.replace('/(tv)/profiles');
+                            router.replace('/login');
                             return;
                         }
-                        router.back();
+                        router.replace('/profiles');
                     },
                 },
             ]
@@ -147,13 +147,13 @@ export default function TvProfileEditScreen() {
     }, [activeProfile, isDeleting, router]);
 
     return (
-        <TVScreen>
+        <TVScreenScrollView>
             {loading ? (
                 <View className="flex-1 items-center justify-center pt-12">
                     <ActivityIndicator size="large" color="#ffffff"/>
                 </View>
             ) : (
-                <View className="flex-1 pt-12">
+                <View className="flex-1" style={{paddingTop: topPadding}}>
                     <Text className="mb-4 font-bodySemi text-xl text-white text-center">Modifier le profil</Text>
                     <ScrollView
                         className="flex-1 w-full max-w-3xl self-center px-12"
@@ -163,7 +163,7 @@ export default function TvProfileEditScreen() {
                         <View>
                             <View className="mb-6">
                                 <Text className="mb-3 font-body text-base text-[#9ca3af]">
-                                    Avatar
+                                    Choisissez un avatar
                                 </Text>
                                 <ScrollView
                                     ref={avatarScrollRef}
@@ -360,15 +360,17 @@ export default function TvProfileEditScreen() {
                                         {isSubmitting ? 'Enregistrement…' : 'Enregistrer'}
                                     </Text>
                                 </TVFocusPressable>
+                                <Text className={'text-white text-center my-6'}>Ou</Text>
                                 <TVFocusPressable
                                     onPress={handleDeleteProfile}
-                                    className="rounded-2xl bg-white/10 py-4"
+                                    className="rounded-2xl py-4 bg-[#ed0341]/50 flex flex-row justify-center gap-2"
                                     style={focusBaseStyle}
                                     focusedStyle={{
                                         transform: [{scale: 1.02}],
                                         backgroundColor: '#ed0341',
                                     }}
                                 >
+                                    <Ionicons name={'trash'} size={20} color="#ffffff" />
                                     <Text className="text-center font-bodySemi text-base text-white">
                                         {isDeleting ? 'Suppression…' : 'Supprimer le profil'}
                                     </Text>
@@ -378,6 +380,6 @@ export default function TvProfileEditScreen() {
                     </ScrollView>
                 </View>
             )}
-        </TVScreen>
+        </TVScreenScrollView>
     );
 }

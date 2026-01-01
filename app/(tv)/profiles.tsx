@@ -1,15 +1,15 @@
-import Ionicons from '@expo/vector-icons/Ionicons';
 import {useFocusEffect} from '@react-navigation/native';
 import {useCallback, useMemo, useRef, useState} from 'react';
 import {FlatList, Image, Text, View} from 'react-native';
-
-import TVScreen from '@/components/tv/TVScreen';
 import TVFocusPressable from '@/components/tv/TVFocusPressable';
 import {getActiveProfileId, getProfiles, setActiveProfileId} from '@/lib/storage';
 import type {XtreamProfile} from '@/lib/types';
 import {useRouter} from "expo-router";
+import {MaterialIcons} from "@expo/vector-icons";
+import TVScreenScrollView from "@/components/tv/TVScreenScrollView";
 
 export default function TvProfilesScreen() {
+    const topPadding = 96;
     const router = useRouter()
     const [profiles, setProfiles] = useState<XtreamProfile[]>([]);
     const [activeId, setActiveId] = useState<string | null>(null);
@@ -58,8 +58,8 @@ export default function TvProfilesScreen() {
     );
 
     return (
-        <TVScreen>
-            <View className="w-full max-w-3xl self-center px-12 pt-12">
+        <TVScreenScrollView>
+            <View className="w-full max-w-3xl self-center px-12" style={{paddingTop: topPadding}}>
                 <Text className="mb-4 font-bodySemi text-xl text-white text-center">Modifier un profil</Text>
                 <FlatList
                     data={orderedProfiles}
@@ -89,7 +89,7 @@ export default function TvProfilesScreen() {
                                         />
                                         <View
                                             className="absolute right-2 top-2 h-7 w-7 items-center justify-center rounded-full bg-ash">
-                                            <Ionicons name="pencil" size={14} color="#ffffff"/>
+                                            <MaterialIcons name="edit" size={14} color="#ffffff"/>
                                         </View>
                                     </View>
                                 </TVFocusPressable>
@@ -98,7 +98,7 @@ export default function TvProfilesScreen() {
                                 </Text>
                                 {isActive ? (
                                     <View
-                                        className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 max-w-[180px] rounded-full bg-ember/95 px-3 py-1">
+                                        className="absolute left-1/2 bottom-1/4 -translate-x-1/2 -translate-y-1/2 max-w-[180px] rounded-full bg-ember/95 px-3 py-1">
                                         <Text
                                             numberOfLines={1}
                                             ellipsizeMode="tail"
@@ -113,6 +113,6 @@ export default function TvProfilesScreen() {
                     }}
                 />
             </View>
-        </TVScreen>
+        </TVScreenScrollView>
     );
 }
